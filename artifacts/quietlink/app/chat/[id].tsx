@@ -64,7 +64,7 @@ export default function ChatScreen() {
 
   const onDelete = () => Alert.alert(
     'Delete this conversation?',
-    'This removes the sample conversation from this running preview. Secure database deletion is not available here.',
+    'This removes the conversation and its local media keys. Encrypted files may remain in flash storage; secure overwrite cannot be guaranteed.',
     [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: () => { deleteThread(id); router.back(); } },
@@ -128,7 +128,9 @@ export default function ChatScreen() {
         <Feather name="lock" size={13} color={colors.primary} />
         <Text style={[styles.prototypeText, { color: colors.accentForeground }]}>
           {messagingStatus === 'locked'
-            ? `Sending locked pending E2EE review${storageStatus === 'encrypted' ? ' · local encrypted storage active' : ''}`
+            ? storageStatus === 'encrypted'
+              ? 'E2EE sending locked · local media encrypted on device'
+              : 'E2EE sending locked · local media requires native SQLCipher'
             : 'Secure messaging enabled'}
         </Text>
       </View>

@@ -40,6 +40,9 @@ function assertNativeMediaStorage() {
 }
 
 function asciiBytes(value: string) {
+  if (Array.from(value).some((character) => character.charCodeAt(0) > 0x7f)) {
+    throw new Error('Invalid authenticated media context.');
+  }
   return Uint8Array.from(value, (character) => character.charCodeAt(0));
 }
 
@@ -51,7 +54,7 @@ function buildChunkAad(input: {
   chunkCount: number;
   index: number;
 }) {
-  return asciiBytes([
+  const canonicalContext = JSON.stringify([
     'QuietLink-Media-AES-256-GCM-v1',
     input.conversationId,
     input.attachmentId,
@@ -60,7 +63,8 @@ function buildChunkAad(input: {
     String(input.totalBytes),
     String(input.chunkCount),
     String(input.index),
-  ].join('|'));
+  ]);
+  return asciiBytes(encodeURIComponent(canonicalContext));
 }
 
 function makeHeader(totalBytes: number, chunkCount: number) {
@@ -158,7 +162,6 @@ export async function pickAndEncryptLocalMedia(
     }
     const chunkCount = Math.ceil(totalBytes / CHUNK_SIZE);
     fileKey = await AESEncryptionKey.generate(AESKeySize.AES256);
-    fileKeyHex = await fileKey.encoded('hex');
 
     const directory = getMediaDirectory();
     if (!directory.exists) directory.create({ intermediates: true, idempotent: true });
@@ -202,6 +205,7 @@ export async function pickAndEncryptLocalMedia(
     sourceHandle.close();
     sourceHandle = null;
 
+    fileKeyHex = await fileKey.encoded('hex');
     await saveLocalMediaAttachment({
       id,
       conversationId,
@@ -214,6 +218,10 @@ export async function pickAndEncryptLocalMedia(
 
     return { id, mimeType, plaintextBytes: totalBytes };
   } catch {
+    try { outputHandle?.close(); } catch { /* already closed */ }
+    outputHandle = null;
+    try { sourceHandle?.close(); } catch { /* already closed */ }
+    sourceHandle = null;
     if (outputFile?.exists) {
       try {
         outputFile.delete();
@@ -261,9 +269,17 @@ export async function streamDecryptedLocalMedia(
       parsed.totalBytes !== metadata.plaintext_bytes ||
       parsed.chunkCount !== metadata.chunk_count ||
       parsed.chunkSize !== CHUNK_SIZE ||
+      parsed.totalBytes <= 0 ||
+      parsed.totalBytes > MAX_MEDIA_BYTES ||
+      parsed.chunkCount <= 0 ||
+      parsed.chunkCount > Math.ceil(MAX_MEDIA_BYTES / CHUNK_SIZE) ||
       parsed.chunkCount !== Math.ceil(parsed.totalBytes / parsed.chunkSize)
     ) {
       throw new Error('Encrypted media header does not match the protected database record.');
+    }
+    const expectedContainerBytes = HEADER_LENGTH + parsed.totalBytes + parsed.chunkCount * SEALED_OVERHEAD;
+    if (fileSize !== expectedContainerBytes) {
+      throw new Error('Encrypted media file is truncated or has unexpected trailing data.');
     }
 
     let deliveredBytes = 0;
