@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
@@ -14,23 +15,46 @@ import {
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { MessageProvider } from '@/context/MessageContext';
+import { AuthProvider, useAuth } from '@/context/AuthContext';
+import { useColors } from '@/hooks/useColors';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
-function RootLayoutNav() {
+function RootLayoutNav({ signedIn }: { signedIn: boolean }) {
   return (
     <Stack screenOptions={{ headerBackTitle: 'Back' }}>
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="chat/[id]" options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="call/[id]" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
-      <Stack.Screen name="status/[id]" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
-      <Stack.Screen name="new-chat" options={{ headerShown: false, presentation: 'modal' }} />
-      <Stack.Screen name="new-status" options={{ headerShown: false, presentation: 'modal' }} />
+      <Stack.Protected guard={signedIn}>
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="chat/[id]" options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="call/[id]" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
+        <Stack.Screen name="status/[id]" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
+        <Stack.Screen name="new-chat" options={{ headerShown: false, presentation: 'modal' }} />
+        <Stack.Screen name="new-status" options={{ headerShown: false, presentation: 'modal' }} />
+      </Stack.Protected>
+      <Stack.Protected guard={!signedIn}>
+        <Stack.Screen name="login" options={{ headerShown: false }} />
+      </Stack.Protected>
     </Stack>
   );
+}
+
+function AppContent() {
+  const { status } = useAuth();
+  const colors = useColors();
+
+  if (status === 'loading') {
+    return (
+      <View style={[styles.loading, { backgroundColor: colors.background }]}>
+        <ActivityIndicator color={colors.primary} />
+      </View>
+    );
+  }
+
+  const navigation = <RootLayoutNav signedIn={status === 'signedIn'} />;
+  return status === 'signedIn' ? <MessageProvider>{navigation}</MessageProvider> : navigation;
 }
 
 export default function RootLayout() {
@@ -55,9 +79,9 @@ export default function RootLayout() {
         <QueryClientProvider client={queryClient}>
           <GestureHandlerRootView>
             <KeyboardProvider>
-              <MessageProvider>
-                <RootLayoutNav />
-              </MessageProvider>
+              <AuthProvider>
+                <AppContent />
+              </AuthProvider>
             </KeyboardProvider>
           </GestureHandlerRootView>
         </QueryClientProvider>
@@ -65,3 +89,12 @@ export default function RootLayout() {
     </SafeAreaProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  loading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: Platform.OS === 'web' ? 48 : 0,
+  },
+});

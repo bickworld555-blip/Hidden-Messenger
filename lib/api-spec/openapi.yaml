@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Phone OTP authentication
 paths:
   /healthz:
     get:
@@ -24,8 +26,175 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /auth/otp/request:
+    post:
+      operationId: requestOtp
+      tags: [auth]
+      summary: Send a phone verification code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OtpRequest"
+      responses:
+        "200":
+          description: Verification code sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OtpRequestAccepted"
+        "400":
+          description: Invalid phone number
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+        "429":
+          description: Too many verification requests
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+        "502":
+          description: SMS provider rejected the message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+        "503":
+          description: SMS provider is not configured or available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+  /auth/otp/verify:
+    post:
+      operationId: verifyOtp
+      tags: [auth]
+      summary: Verify a phone code and create a session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OtpVerification"
+      responses:
+        "200":
+          description: Verification succeeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSessionToken"
+        "400":
+          description: Invalid or expired code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+  /auth/session:
+    get:
+      operationId: getAuthSession
+      tags: [auth]
+      summary: Get the authenticated phone session
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Authenticated session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+        "401":
+          description: Session is missing or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+  /auth/logout:
+    post:
+      operationId: logoutAuthSession
+      tags: [auth]
+      summary: Revoke the current session
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Session revoked
+        "401":
+          description: Session is missing or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
   schemas:
+    OtpRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        phone:
+          type: string
+          minLength: 6
+          maxLength: 32
+      required: [phone]
+    OtpRequestAccepted:
+      type: object
+      properties:
+        phone:
+          type: string
+        expiresInSeconds:
+          type: integer
+        retryAfterSeconds:
+          type: integer
+      required: [phone, expiresInSeconds, retryAfterSeconds]
+    OtpVerification:
+      type: object
+      additionalProperties: false
+      properties:
+        phone:
+          type: string
+          minLength: 13
+          maxLength: 13
+        code:
+          type: string
+          pattern: "^[0-9]{6}$"
+      required: [phone, code]
+    AuthSessionToken:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        phone:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+      required: [accessToken, phone, expiresAt]
+    AuthSession:
+      type: object
+      properties:
+        phone:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+      required: [phone, expiresAt]
+    AuthError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        retryAfterSeconds:
+          type: integer
+      required: [code, message]
     HealthStatus:
       type: object
       properties:

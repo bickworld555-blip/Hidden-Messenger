@@ -6,6 +6,15 @@ The app does not send messages, media, make real calls, publish statuses, or tra
 
 The chat provider opens the vault before showing screens. The adapter checks for SQLCipher and fails closed rather than using plaintext SQLite. The secure-message boundary will only pass protocol-produced ciphertext envelopes to a configured transport. No protocol engine or transport is installed, so sends remain disabled. On native builds with the encrypted vault, users can import photos, videos, and audio for local storage only. Media is never sent, and no E2EE key wrapper is installed.
 
+## Phone OTP authentication
+
+1. The native iOS/Android app accepts a Bangladesh subscriber number and sends it to the API. The API normalizes it to `8801XXXXXXXXX`, generates a cryptographically random six-digit code, and sends it to `https://api.sms.net.bd/sendsms` with an HTTPS JSON POST. The `SMS_NET_BD_API_KEY` exists only in API-server Secrets; it is never included in the mobile bundle.
+2. The API stores only an HMAC-SHA-256 digest of the pending code, keyed with `SESSION_SECRET`, in process memory. Codes expire after five minutes, are single-use, and allow at most five attempts. Requests are limited to one per phone per minute, three per phone per fifteen minutes, and ten per client IP per fifteen minutes. Neither codes nor phone numbers are written to application logs.
+3. Successful verification creates a random 256-bit opaque bearer token. The server stores only its SHA-256 digest in memory for up to thirty days. The mobile app stores the token and account phone in iOS Keychain / Android Keystore-backed SecureStore; the iOS token is device-only. Sign-out requests revocation and removes local values even if the API is unreachable.
+4. OTP challenges, rate-limit counters, and sessions are intentionally process-memory-only in this prototype. A server restart invalidates active sessions and pending codes; multiple API replicas do not share them. A production deployment needs a shared store with atomic expiration and rate limiting, plus operational abuse monitoring, without persisting OTP plaintext.
+5. The SMS provider receives the destination phone number and the verification message, and telecom operators may retain SMS metadata/content. Phone OTP proves access to a phone number; it is not end-to-end encryption, does not hide phone identity from the SMS provider, and does not authenticate the existing signaling gateway. The current API has no account directory, protected chat API, or authenticated WebSocket signaling.
+6. The login flow is disabled in web preview because the web platform cannot provide the app's native secure token storage. A native iOS/Android build and a configured `SMS_NET_BD_API_KEY` are required for a real SMS login.
+
 ## Target architecture
 
 ```text
@@ -45,7 +54,7 @@ The delete action removes message/conversation rows from SQLCipher when the nati
 ## Known non-goals in this prototype
 
 - No WhatsApp branding, copied assets, or exact proprietary screen reproduction.
-- No production identity system, key verification, Signal Protocol implementation, TURN server, WebRTC data channel, or message delivery. The ephemeral signaling gateway exists but the mobile client does not use it.
+- Phone OTP is a limited prototype identity check only; there is no account directory, phone discovery, key verification, Signal Protocol implementation, TURN server, WebRTC data channel, protected chat API, or message delivery. The ephemeral signaling gateway exists but the mobile client does not use it and does not authenticate its WebSocket connections.
 - No E2EE media-key wrapping or media sharing; local file keys are only protected by SQLCipher at rest.
 - No in-app decrypted media renderer; the streaming API has not been verified with native image, video, or audio decoders.
 - No secure overwrite or anti-forensics feature.

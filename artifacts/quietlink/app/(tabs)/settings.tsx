@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/Avatar';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { useMessages } from '@/context/MessageContext';
+import { useAuth } from '@/context/AuthContext';
 import { useColors } from '@/hooks/useColors';
 
 function SettingRow({
@@ -37,6 +38,7 @@ export default function SettingsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { storageStatus, storageError, messagingStatus, resetEncryptedVault } = useMessages();
+  const { session, signOut } = useAuth();
   const [previews, setPreviews] = React.useState(true);
   const explainNotReady = (feature: string) => Alert.alert(feature, 'This feature is not connected in the prototype. Messages are never sent to a messaging network.');
   return (
@@ -44,12 +46,29 @@ export default function SettingsScreen() {
       <View style={styles.page}>
         <ScreenHeader title="Settings" subtitle="Privacy is a product feature" />
         <View style={[styles.profileCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Avatar initials="AK" color="#5D8F82" size={54} />
+          <Avatar initials={session?.phone?.slice(-2) ?? 'QL'} color="#5D8F82" size={54} />
           <View style={{ flex: 1 }}>
-            <Text style={[styles.profileName, { color: colors.foreground }]}>Alex Kim</Text>
-            <Text style={[styles.profileId, { color: colors.mutedForeground }]}>QuietLink ID · not registered</Text>
+            <Text style={[styles.profileName, { color: colors.foreground }]}>Phone account</Text>
+            <Text style={[styles.profileId, { color: colors.mutedForeground }]}>{session?.phone ? `+${session.phone}` : 'Signed-in device session'}</Text>
           </View>
-          <Feather name="edit-2" size={16} color={colors.mutedForeground} />
+          <Feather name="shield" size={17} color={colors.primary} />
+        </View>
+
+        <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>ACCOUNT</Text>
+        <View style={[styles.group, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <SettingRow
+            icon="log-out"
+            title="Sign out"
+            detail="Revoke this device session"
+            onPress={() => Alert.alert(
+              'Sign out of QuietLink?',
+              'This removes the saved device token and asks the API to revoke this session.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Sign out', style: 'destructive', onPress: () => void signOut() },
+              ],
+            )}
+          />
         </View>
 
         <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>PRIVACY & SECURITY</Text>
