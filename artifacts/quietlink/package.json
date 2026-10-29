@@ -2,6 +2,11 @@
   "name": "@workspace/quietlink",
   "version": "0.0.0",
   "private": true,
+  "expo": {
+    "install": {
+      "exclude": ["expo-notifications"]
+    }
+  },
   "main": "expo-router/entry",
   "scripts": {
     "dev": "sh -c 'if [ -n \"$REPLIT_EXPO_SESSION_SECRET\" ]; then pnpm exec create-launch login --session \"$REPLIT_EXPO_SESSION_SECRET\" || true; fi' && EXPO_PACKAGER_PROXY_URL=https://$REPLIT_EXPO_DEV_DOMAIN EXPO_PUBLIC_DOMAIN=$REPLIT_DEV_DOMAIN EXPO_PUBLIC_REPL_ID=$REPL_ID REACT_NATIVE_PACKAGER_HOSTNAME=$REPLIT_DEV_DOMAIN pnpm exec expo start --localhost --port $PORT",
@@ -56,9 +61,11 @@
     "zod-validation-error": "^3.4.0"
   },
   "dependencies": {
+    "expo-audio": "~58.0.10",
     "expo-crypto": "~58.0.7",
     "expo-document-picker": "58.0.4",
     "expo-file-system": "58.0.9",
+    "expo-notifications": "58.1.4",
     "expo-secure-store": "~58.0.2",
     "expo-sqlite": "~58.0.14",
     "react-native-libsodium": "1.7.0"

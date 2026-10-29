@@ -29,12 +29,47 @@
         "expo-sqlite",
         {
           "useSQLCipher": true,
-          "ios": { "useSQLCipher": true },
-          "android": { "useSQLCipher": true }
+          "ios": {
+            "useSQLCipher": true
+          },
+          "android": {
+            "useSQLCipher": true
+          }
         }
       ],
-      ["expo-secure-store", { "configureAndroidBackup": true }],
-      ["react-native-libsodium", {}]
+      [
+        "expo-secure-store",
+        {
+          "configureAndroidBackup": true
+        }
+      ],
+      [
+        "react-native-libsodium",
+        {}
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "QuietLink uses the microphone for voice notes and voice calls.",
+          "enableBackgroundPlayback": false,
+          "enableBackgroundRecording": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "QuietLink accesses selected photos and videos only when you choose an attachment.",
+          "cameraPermission": "QuietLink uses the camera when you explicitly choose a camera feature.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "quietlink-alerts",
+          "sounds": []
+        }
+      ]
     ],
     "newArchEnabled": true,
     "experiments": {

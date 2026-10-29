@@ -5,10 +5,15 @@ import { Feather } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/Avatar';
+import { VoiceNotePanel } from '@/components/VoiceNotePanel';
+import { SOUND_ASSETS } from '@/components/SoundPreviewButton';
+import { useAppSettings } from '@/context/AppSettingsContext';
 import { useMessages } from '@/context/MessageContext';
 import { useColors } from '@/hooks/useColors';
 import type { ChatMessage } from '@/context/MessageContext';
 import { pickAndEncryptLocalMedia, type LocalMediaKind } from '@/storage/secureMedia';
+import { requestDevicePermission } from '@/services/devicePermissions';
+import { useAudioPlayer } from 'expo-audio';
 
 function MessageBubble({ message }: { message: ChatMessage }) {
   const colors = useColors();
@@ -44,11 +49,14 @@ export default function ChatScreen() {
   const params = useLocalSearchParams<{ id: string }>();
   const id = String(params.id ?? '');
   const { threads, messages, sendMessage, deleteThread, markRead, storageStatus, messagingStatus } = useMessages();
+  const { settings } = useAppSettings();
   const thread = threads.find((item) => item.id === id);
   const conversationMessages = useMemo(() => messages.filter((message) => message.conversationId === id), [messages, id]);
   const [draft, setDraft] = useState('');
   const [attachmentOpen, setAttachmentOpen] = useState(false);
+  const [voicePanelOpen, setVoicePanelOpen] = useState(false);
   const [mediaBusy, setMediaBusy] = useState(false);
+  const sentSoundPlayer = useAudioPlayer(SOUND_ASSETS.sent);
 
   useEffect(() => { markRead(id); }, [id, markRead]);
 
@@ -64,7 +72,23 @@ export default function ChatScreen() {
   const onSend = async () => {
     if (!draft.trim() || messagingStatus !== 'ready') return;
     const sent = await sendMessage(id, draft);
-    if (sent) setDraft('');
+    if (sent) {
+      setDraft('');
+      if (settings.chatSoundsEnabled) sentSoundPlayer.play();
+    }
+  };
+
+  const checkMicrophoneForVoiceNotes = async () => {
+    const permission = await requestDevicePermission('microphone');
+    if (permission.status === 'granted') {
+      Alert.alert('Microphone allowed', 'Voice recording remains locked until QuietLink can encrypt microphone data without creating a plaintext temporary file.');
+    } else if (permission.status === 'unavailable') {
+      Alert.alert('Microphone unavailable', 'Request microphone access from the native iOS or Android app. This web preview cannot record securely.');
+    } else if (permission.status === 'denied' && !permission.canAskAgain) {
+      Alert.alert('Microphone access denied', 'Open QuietLink in device settings to allow microphone access.');
+    } else {
+      Alert.alert('Microphone access needed', 'Allow microphone access to prepare for voice notes. Recording is still locked until encrypted capture is available.');
+    }
   };
 
   const onDelete = () => Alert.alert(
@@ -118,10 +142,10 @@ export default function ChatScreen() {
           <Text numberOfLines={1} style={[styles.headerName, { color: colors.foreground }]}>{thread.name}</Text>
           <Text style={[styles.headerStatus, { color: colors.mutedForeground }]}>{thread.online ? 'Online · preview' : 'Private conversation'}</Text>
         </View>
-        <Pressable onPress={() => router.push({ pathname: '/call/[id]', params: { id, name: thread.name, mode: 'audio' } })} hitSlop={10} accessibilityLabel="Start voice call">
+        <Pressable onPress={() => router.push({ pathname: '/call/[id]', params: { id, name: thread.name, mode: 'audio', stage: 'outgoing' } })} hitSlop={10} accessibilityLabel="Open voice call preview">
           <Feather name="phone" size={19} color={colors.primary} />
         </Pressable>
-        <Pressable onPress={() => router.push({ pathname: '/call/[id]', params: { id, name: thread.name, mode: 'video' } })} hitSlop={10} accessibilityLabel="Start video call" style={{ marginLeft: 15 }}>
+        <Pressable onPress={() => router.push({ pathname: '/call/[id]', params: { id, name: thread.name, mode: 'video', stage: 'outgoing' } })} hitSlop={10} accessibilityLabel="Open video call preview" style={{ marginLeft: 15 }}>
           <Feather name="video" size={20} color={colors.primary} />
         </Pressable>
         <Pressable onPress={onDelete} hitSlop={10} accessibilityLabel="Delete conversation" style={{ marginLeft: 15 }}>
@@ -172,6 +196,13 @@ export default function ChatScreen() {
         </View>
       ) : null}
 
+      {voicePanelOpen ? (
+        <VoiceNotePanel
+          onCheckMicrophone={() => void checkMicrophoneForVoiceNotes()}
+          onClose={() => setVoicePanelOpen(false)}
+        />
+      ) : null}
+
       <View style={[styles.composerWrap, { paddingBottom: Math.max(insets.bottom, Platform.OS === 'web' ? 34 : 8), borderTopColor: colors.border, backgroundColor: colors.background }]}>
         <Pressable onPress={() => setAttachmentOpen((value) => !value)} style={styles.composerIcon} disabled={storageStatus !== 'encrypted' || mediaBusy} accessibilityLabel="Open local media options">
           <Feather name={attachmentOpen ? 'x' : 'plus'} size={22} color={storageStatus === 'encrypted' ? colors.primary : colors.mutedForeground} />
@@ -193,8 +224,8 @@ export default function ChatScreen() {
             <Feather name="arrow-up" size={19} color={colors.primaryForeground} />
           </Pressable>
         ) : (
-          <Pressable onPress={() => Alert.alert('Voice note unavailable', 'Recording and sending audio require a reviewed E2EE protocol and media transport.')} style={styles.composerIcon} disabled={messagingStatus !== 'ready'} accessibilityLabel="Record voice message">
-            <Feather name="mic" size={20} color={colors.primary} />
+          <Pressable onPress={() => { setVoicePanelOpen((value) => !value); setAttachmentOpen(false); }} style={styles.composerIcon} disabled={mediaBusy} accessibilityLabel="Open voice note controls">
+            <Feather name={voicePanelOpen ? 'x' : 'mic'} size={20} color={colors.primary} />
           </Pressable>
         )}
       </View>

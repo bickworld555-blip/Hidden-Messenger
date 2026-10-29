@@ -13,9 +13,13 @@ import {
   useFonts,
 } from '@expo-google-fonts/inter';
 import { Stack } from 'expo-router';
+import { useRouter } from 'expo-router';
+import * as Notifications from 'expo-notifications';
 import * as SplashScreen from 'expo-splash-screen';
 import { MessageProvider } from '@/context/MessageContext';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
+import { AppSettingsProvider } from '@/context/AppSettingsContext';
+import { configureLocalNotifications } from '@/services/quietLinkNotifications';
 import { useColors } from '@/hooks/useColors';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
@@ -24,6 +28,28 @@ SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
 
 function RootLayoutNav({ signedIn }: { signedIn: boolean }) {
+  const router = useRouter();
+  useEffect(() => {
+    void configureLocalNotifications();
+    const responseListener = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data as Record<string, unknown>;
+      if (data.type === 'call' && typeof data.callId === 'string') {
+        router.push({
+          pathname: '/call/[id]',
+          params: {
+            id: data.callId,
+            name: typeof data.name === 'string' ? data.name : 'QuietLink contact',
+            mode: data.mode === 'video' ? 'video' : 'audio',
+            stage: 'incoming',
+          },
+        });
+      } else if (data.type === 'message' && typeof data.conversationId === 'string') {
+        router.push({ pathname: '/chat/[id]', params: { id: data.conversationId } });
+      }
+    });
+    return () => responseListener.remove();
+  }, [router]);
+
   return (
     <Stack screenOptions={{ headerBackTitle: 'Back' }}>
       <Stack.Protected guard={signedIn}>
@@ -80,7 +106,9 @@ export default function RootLayout() {
           <GestureHandlerRootView>
             <KeyboardProvider>
               <AuthProvider>
-                <AppContent />
+                <AppSettingsProvider>
+                  <AppContent />
+                </AppSettingsProvider>
               </AuthProvider>
             </KeyboardProvider>
           </GestureHandlerRootView>
