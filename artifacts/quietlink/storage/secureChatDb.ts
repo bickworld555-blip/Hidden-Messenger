@@ -21,6 +21,19 @@ export type LocalConversation = {
   is_group: number;
 };
 
+export type LocalMediaAttachment = {
+  id: string;
+  conversation_id: string;
+  mime_type: string;
+  plaintext_bytes: number;
+  chunk_size: number;
+  chunk_count: number;
+  file_key_hex: string;
+  created_at: number;
+};
+
+export type LocalMediaAttachmentSummary = Omit<LocalMediaAttachment, 'file_key_hex'>;
+
 export async function shouldSeedDemoContent() {
   const SecureStore = await import('expo-secure-store');
   return (await SecureStore.getItemAsync(DEMO_SUPPRESSED_KEY)) !== 'true';
@@ -99,7 +112,19 @@ async function initializeDatabase() {
       );
       CREATE INDEX IF NOT EXISTS messages_by_conversation_time
         ON messages(conversation_id, created_at);
-      PRAGMA user_version = 1;
+      CREATE TABLE IF NOT EXISTS media_attachments (
+        id TEXT PRIMARY KEY NOT NULL,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        mime_type TEXT NOT NULL,
+        plaintext_bytes INTEGER NOT NULL CHECK (plaintext_bytes > 0),
+        chunk_size INTEGER NOT NULL CHECK (chunk_size > 0),
+        chunk_count INTEGER NOT NULL CHECK (chunk_count > 0),
+        file_key_hex TEXT NOT NULL CHECK (length(file_key_hex) = 64),
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS media_by_conversation_time
+        ON media_attachments(conversation_id, created_at);
+      PRAGMA user_version = 2;
     `);
     return database;
   } catch (error) {
@@ -223,6 +248,69 @@ export async function updateLocalUnread(conversationId: string, unreadCount: num
   await db.runAsync(
     'UPDATE conversations SET unread_count = ? WHERE id = ?',
     Math.max(0, Math.floor(unreadCount)),
+    conversationId,
+  );
+}
+
+export async function saveLocalMediaAttachment(attachment: {
+  id: string;
+  conversationId: string;
+  mimeType: string;
+  plaintextBytes: number;
+  chunkSize: number;
+  chunkCount: number;
+  fileKeyHex: string;
+}) {
+  if (!/^[0-9a-f-]{36}$/i.test(attachment.id)) {
+    throw new Error('Invalid local media identifier.');
+  }
+  if (!/^(image|video|audio)\/[a-z0-9.+-]+$/i.test(attachment.mimeType)) {
+    throw new Error('Unsupported local media type.');
+  }
+  if (!/^[0-9a-f]{64}$/i.test(attachment.fileKeyHex)) {
+    throw new Error('Invalid local media key. The attachment was not saved.');
+  }
+  if (
+    !Number.isSafeInteger(attachment.plaintextBytes) ||
+    attachment.plaintextBytes <= 0 ||
+    !Number.isSafeInteger(attachment.chunkSize) ||
+    attachment.chunkSize <= 0 ||
+    !Number.isSafeInteger(attachment.chunkCount) ||
+    attachment.chunkCount <= 0
+  ) {
+    throw new Error('Invalid local media metadata.');
+  }
+
+  const db = await openSecureChatDatabase();
+  await db.runAsync(
+    `INSERT INTO media_attachments (
+      id, conversation_id, mime_type, plaintext_bytes, chunk_size, chunk_count, file_key_hex, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    attachment.id,
+    attachment.conversationId,
+    attachment.mimeType.toLowerCase(),
+    attachment.plaintextBytes,
+    attachment.chunkSize,
+    attachment.chunkCount,
+    attachment.fileKeyHex.toLowerCase(),
+    Date.now(),
+  );
+}
+
+export async function getLocalMediaAttachment(id: string) {
+  const db = await openSecureChatDatabase();
+  return db.getFirstAsync<LocalMediaAttachment>(
+    `SELECT id, conversation_id, mime_type, plaintext_bytes, chunk_size, chunk_count, file_key_hex, created_at
+     FROM media_attachments WHERE id = ?`,
+    id,
+  );
+}
+
+export async function listLocalMediaAttachments(conversationId: string) {
+  const db = await openSecureChatDatabase();
+  return db.getAllAsync<LocalMediaAttachmentSummary>(
+    `SELECT id, conversation_id, mime_type, plaintext_bytes, chunk_size, chunk_count, created_at
+     FROM media_attachments WHERE conversation_id = ? ORDER BY created_at ASC`,
     conversationId,
   );
 }

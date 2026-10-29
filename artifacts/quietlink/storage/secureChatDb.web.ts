@@ -45,6 +45,18 @@ export async function updateLocalUnread(): Promise<never> {
   throw unavailable();
 }
 
+export async function saveLocalMediaAttachment(): Promise<never> {
+  throw unavailable();
+}
+
+export async function getLocalMediaAttachment(): Promise<never> {
+  throw unavailable();
+}
+
+export async function listLocalMediaAttachments(): Promise<never[]> {
+  throw unavailable();
+}
+
 export async function deleteLocalConversation(): Promise<never> {
   throw unavailable();
 }

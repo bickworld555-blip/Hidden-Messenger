@@ -8,6 +8,7 @@ import { Avatar } from '@/components/Avatar';
 import { useMessages } from '@/context/MessageContext';
 import { useColors } from '@/hooks/useColors';
 import type { ChatMessage } from '@/context/MessageContext';
+import { pickAndEncryptLocalMedia, type LocalMediaKind } from '@/storage/secureMedia';
 
 function MessageBubble({ message }: { message: ChatMessage }) {
   const colors = useColors();
@@ -42,6 +43,7 @@ export default function ChatScreen() {
   const conversationMessages = useMemo(() => messages.filter((message) => message.conversationId === id), [messages, id]);
   const [draft, setDraft] = useState('');
   const [attachmentOpen, setAttachmentOpen] = useState(false);
+  const [mediaBusy, setMediaBusy] = useState(false);
 
   useEffect(() => { markRead(id); }, [id, markRead]);
 
@@ -69,13 +71,31 @@ export default function ChatScreen() {
     ],
   );
 
-  const attachmentAction = (label: string) => {
+  const attachmentAction = async (kind: LocalMediaKind, label: string) => {
     setAttachmentOpen(false);
-    if (messagingStatus !== 'ready') {
-      Alert.alert('Sharing locked', 'Media sending is disabled until reviewed end-to-end encryption and encrypted media storage are configured.');
+    if (storageStatus !== 'encrypted') {
+      Alert.alert('Encrypted storage unavailable', 'Local media import requires the native SQLCipher vault. No plaintext fallback is available.');
       return;
     }
-    Alert.alert(label, 'Media encryption and secure transport are not configured, so sharing remains unavailable.');
+    if (mediaBusy) return;
+    setMediaBusy(true);
+    try {
+      const saved = await pickAndEncryptLocalMedia(id, kind);
+      if (saved) {
+        const sizeMb = (saved.plaintextBytes / (1024 * 1024)).toFixed(1);
+        Alert.alert(
+          'Saved encrypted on this device',
+          `${label} (${sizeMb} MB) was encrypted locally. It was not sent; media sharing remains locked pending E2EE review.`,
+        );
+      }
+    } catch (error) {
+      Alert.alert(
+        'Could not save media',
+        error instanceof Error ? error.message : 'Local media encryption failed. No plaintext cache fallback was used.',
+      );
+    } finally {
+      setMediaBusy(false);
+    }
   };
 
   return (
@@ -108,7 +128,7 @@ export default function ChatScreen() {
         <Feather name="lock" size={13} color={colors.primary} />
         <Text style={[styles.prototypeText, { color: colors.accentForeground }]}>
           {messagingStatus === 'locked'
-            ? `Demo history · sending locked pending E2EE review${storageStatus === 'encrypted' ? ' · local vault active' : ''}`
+            ? `Sending locked pending E2EE review${storageStatus === 'encrypted' ? ' · local encrypted storage active' : ''}`
             : 'Secure messaging enabled'}
         </Text>
       </View>
@@ -127,22 +147,27 @@ export default function ChatScreen() {
       {attachmentOpen ? (
         <View style={[styles.attachmentPanel, { backgroundColor: colors.card, borderColor: colors.border }]}>
           {[
-            { icon: 'image' as const, label: 'Photo' },
-            { icon: 'file' as const, label: 'File' },
-            { icon: 'map-pin' as const, label: 'Location' },
-            { icon: 'mic' as const, label: 'Voice note' },
+            { icon: 'image' as const, label: 'Photo', kind: 'image' as const },
+            { icon: 'video' as const, label: 'Video', kind: 'video' as const },
+            { icon: 'headphones' as const, label: 'Audio', kind: 'audio' as const },
           ].map((item) => (
-            <Pressable key={item.label} onPress={() => attachmentAction(item.label)} style={styles.attachmentOption}>
+            <Pressable
+              key={item.label}
+              onPress={() => void attachmentAction(item.kind, item.label)}
+              style={[styles.attachmentOption, mediaBusy && { opacity: 0.55 }]}
+              disabled={mediaBusy || storageStatus !== 'encrypted'}
+              accessibilityLabel={`Encrypt ${item.label.toLowerCase()} locally`}
+            >
               <View style={[styles.attachmentIcon, { backgroundColor: colors.accent }]}><Feather name={item.icon} size={17} color={colors.primary} /></View>
-              <Text style={[styles.attachmentLabel, { color: colors.foreground }]}>{item.label}</Text>
+              <Text style={[styles.attachmentLabel, { color: colors.foreground }]}>{mediaBusy ? 'Encrypting' : item.label}</Text>
             </Pressable>
           ))}
         </View>
       ) : null}
 
       <View style={[styles.composerWrap, { paddingBottom: Math.max(insets.bottom, Platform.OS === 'web' ? 34 : 8), borderTopColor: colors.border, backgroundColor: colors.background }]}>
-        <Pressable onPress={() => setAttachmentOpen((value) => !value)} style={styles.composerIcon} disabled={messagingStatus !== 'ready'} accessibilityLabel="Open attachment options">
-          <Feather name={attachmentOpen ? 'x' : 'plus'} size={22} color={colors.primary} />
+        <Pressable onPress={() => setAttachmentOpen((value) => !value)} style={styles.composerIcon} disabled={storageStatus !== 'encrypted' || mediaBusy} accessibilityLabel="Open local media options">
+          <Feather name={attachmentOpen ? 'x' : 'plus'} size={22} color={storageStatus === 'encrypted' ? colors.primary : colors.mutedForeground} />
         </Pressable>
         <TextInput
           value={draft}
@@ -161,7 +186,7 @@ export default function ChatScreen() {
             <Feather name="arrow-up" size={19} color={colors.primaryForeground} />
           </Pressable>
         ) : (
-          <Pressable onPress={() => attachmentAction('Voice message')} style={styles.composerIcon} disabled={messagingStatus !== 'ready'} accessibilityLabel="Record voice message">
+          <Pressable onPress={() => Alert.alert('Voice note unavailable', 'Recording and sending audio require a reviewed E2EE protocol and media transport.')} style={styles.composerIcon} disabled={messagingStatus !== 'ready'} accessibilityLabel="Record voice message">
             <Feather name="mic" size={20} color={colors.primary} />
           </Pressable>
         )}
