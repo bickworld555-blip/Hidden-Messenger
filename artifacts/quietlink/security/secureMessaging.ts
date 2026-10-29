@@ -49,8 +49,12 @@ export interface EncryptedRealtimeTransport {
 }
 
 export class E2EEUnavailableError extends Error {
-  constructor() {
-    super('Message sending is locked until a reviewed E2EE protocol and encrypted transport are configured.');
+  constructor(feature: 'message' | 'media' = 'message') {
+    super(
+      feature === 'media'
+        ? 'Media sharing is locked until a reviewed E2EE protocol, matching media-key wrapper, and encrypted media transport are configured.'
+        : 'Message sending is locked until a reviewed E2EE protocol and encrypted transport are configured.',
+    );
     this.name = 'E2EEUnavailableError';
   }
 }
@@ -97,7 +101,7 @@ export async function wrapMediaFileKey(input: {
   fileKey: Uint8Array;
 }) {
   const adapter = mediaKeyWrapper;
-  if (!adapter || !isMediaKeyWrappingReady()) throw new E2EEUnavailableError();
+  if (!adapter || !isMediaKeyWrappingReady()) throw new E2EEUnavailableError('media');
   if (input.fileKey.length !== 32) throw new Error('Media file keys must be 256 bits.');
   const envelope = await adapter.wrapMediaFileKey(input);
   if (
@@ -115,7 +119,7 @@ export async function wrapMediaFileKey(input: {
 
 export async function unwrapMediaFileKey(envelope: WrappedMediaFileKeyEnvelope) {
   const adapter = mediaKeyWrapper;
-  if (!adapter || !isMediaKeyWrappingReady()) throw new E2EEUnavailableError();
+  if (!adapter || !isMediaKeyWrappingReady()) throw new E2EEUnavailableError('media');
   if (
     envelope.version !== 1 ||
     envelope.protocol !== adapter.protocolId ||

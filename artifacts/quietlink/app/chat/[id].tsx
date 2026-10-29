@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, FlatList, Image, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, FlatList, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Feather } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -20,9 +20,14 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           ? { backgroundColor: colors.primary, borderBottomRightRadius: 5 }
           : { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1, borderBottomLeftRadius: 5 },
       ]}>
-        {message.imageUri ? <Image source={{ uri: message.imageUri }} style={styles.sharedImage} resizeMode="cover" /> : null}
+        {message.imageUri ? (
+          <View style={[styles.lockedMedia, { backgroundColor: colors.secondary }]}>
+            <Feather name="lock" size={18} color={colors.primary} />
+            <Text style={[styles.lockedMediaText, { color: colors.secondaryForeground }]}>Encrypted media preview unavailable</Text>
+          </View>
+        ) : null}
         {message.imageUri ? null : <Text style={[styles.messageText, { color: message.outgoing ? colors.primaryForeground : colors.foreground }]}>{message.text}</Text>}
-        {message.imageUri ? <Text style={[styles.imageCaption, { color: message.outgoing ? colors.primaryForeground : colors.foreground }]}>{message.text}</Text> : null}
+        {message.imageUri && message.text ? <Text style={[styles.imageCaption, { color: message.outgoing ? colors.primaryForeground : colors.foreground }]}>{message.text}</Text> : null}
         <View style={styles.messageMeta}>
           <Text style={[styles.messageTime, { color: message.outgoing ? 'rgba(255,255,255,0.72)' : colors.mutedForeground }]}>{message.time}</Text>
           {message.outgoing ? <Feather name={message.status === 'read' ? 'check' : 'check'} size={13} color="rgba(255,255,255,0.78)" /> : null}
@@ -210,7 +215,8 @@ const styles = StyleSheet.create({
   incomingLine: { alignItems: 'flex-start' },
   outgoingLine: { alignItems: 'flex-end' },
   bubble: { maxWidth: '84%', borderRadius: 18, paddingHorizontal: 13, paddingTop: 9, paddingBottom: 6, minWidth: 95 },
-  sharedImage: { width: 225, height: 190, borderRadius: 12, maxWidth: '100%' },
+  lockedMedia: { width: 225, minHeight: 96, maxWidth: '100%', borderRadius: 12, alignItems: 'center', justifyContent: 'center', gap: 8, padding: 14 },
+  lockedMediaText: { fontSize: 11, fontWeight: '600', textAlign: 'center' },
   imageCaption: { fontSize: 12, marginTop: 7 },
   messageText: { fontSize: 14, lineHeight: 20 },
   messageMeta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 4 },

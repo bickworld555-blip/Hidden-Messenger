@@ -7,6 +7,7 @@ import {
   openSecureChatDatabase,
   saveLocalMediaAttachment,
 } from '@/storage/secureChatDb';
+import { readExactly, withAuthenticatedMediaChunk } from '@/storage/secureMediaBuffers';
 
 const MEDIA_DIRECTORY_NAME = 'quietlink-secure-media';
 const CONTAINER_MAGIC = [0x51, 0x4c, 0x4d, 0x31] as const; // QLM1
@@ -93,21 +94,6 @@ function parseHeader(header: Uint8Array) {
   };
 }
 
-async function readExactly(handle: FileHandle, length: number) {
-  const output = new Uint8Array(length);
-  let offset = 0;
-  while (offset < length) {
-    const part = await handle.readBytes(length - offset);
-    if (part.length === 0) {
-      output.fill(0);
-      throw new Error('The selected media file ended before the expected number of bytes.');
-    }
-    output.set(part, offset);
-    offset += part.length;
-  }
-  return output;
-}
-
 function getMediaDirectory() {
   return new Directory(Paths.document, MEDIA_DIRECTORY_NAME);
 }
@@ -188,10 +174,14 @@ export async function pickAndEncryptLocalMedia(
         });
         const ciphertext = await sealed.combined();
         if (ciphertext.length !== plaintextLength + SEALED_OVERHEAD) {
+          ciphertext.fill(0);
           throw new Error('The native AES-GCM provider returned an unexpected frame size.');
         }
-        await outputHandle.writeBytes(ciphertext);
-        ciphertext.fill(0);
+        try {
+          await outputHandle.writeBytes(ciphertext);
+        } finally {
+          ciphertext.fill(0);
+        }
       } finally {
         plaintext.fill(0);
       }
@@ -246,6 +236,7 @@ export async function pickAndEncryptLocalMedia(
 export async function streamDecryptedLocalMedia(
   attachmentId: string,
   consumeChunk: DecryptedMediaChunkConsumer,
+  options: { signal?: AbortSignal } = {},
 ) {
   assertNativeMediaStorage();
   const metadata = await getLocalMediaAttachment(attachmentId);
@@ -254,16 +245,26 @@ export async function streamDecryptedLocalMedia(
   let inputHandle: FileHandle | null = null;
   let key: AESEncryptionKey | null = null;
   try {
-    key = await AESEncryptionKey.import(metadata.file_key_hex, 'hex');
+    let fileKeyHex = metadata.file_key_hex;
+    metadata.file_key_hex = '';
+    try {
+      key = await AESEncryptionKey.import(fileKeyHex, 'hex');
+    } finally {
+      fileKeyHex = '';
+    }
     const encryptedFile = new File(getMediaDirectory(), `${metadata.id}.qlm`);
     if (!encryptedFile.exists) throw new Error('Encrypted media file is missing.');
     inputHandle = encryptedFile.open(FileMode.ReadOnly);
     const fileSize = inputHandle.size;
     if (fileSize === null || fileSize < HEADER_LENGTH) throw new Error('Encrypted media file is truncated.');
 
-    const header = await readExactly(inputHandle, HEADER_LENGTH);
-    const parsed = parseHeader(header);
-    header.fill(0);
+    const header = await readExactly(inputHandle, HEADER_LENGTH, options.signal);
+    let parsed: ReturnType<typeof parseHeader>;
+    try {
+      parsed = parseHeader(header);
+    } finally {
+      header.fill(0);
+    }
     if (
       parsed.chunkSize !== metadata.chunk_size ||
       parsed.totalBytes !== metadata.plaintext_bytes ||
@@ -285,36 +286,50 @@ export async function streamDecryptedLocalMedia(
     let deliveredBytes = 0;
     for (let index = 0; index < parsed.chunkCount; index += 1) {
       const plaintextLength = Math.min(parsed.chunkSize, parsed.totalBytes - deliveredBytes);
-      const combined = await readExactly(inputHandle, plaintextLength + SEALED_OVERHEAD);
-      let plaintext: Uint8Array | null = null;
-      try {
-        const sealed = AESSealedData.fromCombined(combined, {
-          ivLength: GCM_IV_LENGTH,
-          tagLength: GCM_TAG_LENGTH,
-        });
-        const decrypted = await aesDecryptAsync(sealed, key, {
-          output: 'bytes',
-          additionalData: buildChunkAad({
-            conversationId: metadata.conversation_id,
-            attachmentId: metadata.id,
-            mimeType: metadata.mime_type,
-            totalBytes: parsed.totalBytes,
-            chunkCount: parsed.chunkCount,
-            index,
-          }),
-        });
-        if (typeof decrypted === 'string' || decrypted.length !== plaintextLength) {
-          throw new Error('Decrypted media chunk has an invalid length.');
-        }
-        plaintext = decrypted;
-        await consumeChunk(plaintext, index);
-        deliveredBytes += plaintext.length;
-      } finally {
-        combined.fill(0);
-        plaintext?.fill(0);
-      }
+      const combined = await readExactly(
+        inputHandle,
+        plaintextLength + SEALED_OVERHEAD,
+        options.signal,
+      );
+      const activeKey = key;
+      if (!activeKey) throw new Error('The media file key is unavailable.');
+      await withAuthenticatedMediaChunk(
+        combined,
+        async (encryptedFrame) => {
+          const sealed = AESSealedData.fromCombined(encryptedFrame, {
+            ivLength: GCM_IV_LENGTH,
+            tagLength: GCM_TAG_LENGTH,
+          });
+          const decrypted = await aesDecryptAsync(sealed, activeKey, {
+            output: 'bytes',
+            additionalData: buildChunkAad({
+              conversationId: metadata.conversation_id,
+              attachmentId: metadata.id,
+              mimeType: metadata.mime_type,
+              totalBytes: parsed.totalBytes,
+              chunkCount: parsed.chunkCount,
+              index,
+            }),
+          });
+          if (typeof decrypted === 'string') {
+            throw new Error('The native AES-GCM provider did not return a byte buffer.');
+          }
+          return decrypted;
+        },
+        async (plaintext) => {
+          if (plaintext.length !== plaintextLength) {
+            throw new Error('Decrypted media chunk has an invalid length.');
+          }
+          await consumeChunk(plaintext, index);
+          deliveredBytes += plaintext.length;
+        },
+        options.signal,
+      );
     }
 
+    if (options.signal?.aborted) {
+      throw new Error('Encrypted media reading was interrupted.');
+    }
     if (deliveredBytes !== parsed.totalBytes || inputHandle.offset !== fileSize) {
       throw new Error('Encrypted media stream has trailing or missing data.');
     }

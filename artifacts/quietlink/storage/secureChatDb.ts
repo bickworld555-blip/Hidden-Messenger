@@ -21,7 +21,7 @@ export type LocalConversation = {
   is_group: number;
 };
 
-export type LocalMediaAttachment = {
+type LocalMediaAttachment = {
   id: string;
   conversation_id: string;
   mime_type: string;
@@ -112,6 +112,8 @@ async function initializeDatabase() {
       );
       CREATE INDEX IF NOT EXISTS messages_by_conversation_time
         ON messages(conversation_id, created_at);
+      -- This table is inside the SQLCipher vault. The file key is never written
+      -- to the media directory or returned by the attachment-list summary.
       CREATE TABLE IF NOT EXISTS media_attachments (
         id TEXT PRIMARY KEY NOT NULL,
         conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
@@ -282,6 +284,8 @@ export async function saveLocalMediaAttachment(attachment: {
   }
 
   const db = await openSecureChatDatabase();
+  // fileKeyHex is raw key material in process memory; SQLCipher encrypts the
+  // database page before it reaches persistent storage.
   await db.runAsync(
     `INSERT INTO media_attachments (
       id, conversation_id, mime_type, plaintext_bytes, chunk_size, chunk_count, file_key_hex, created_at
