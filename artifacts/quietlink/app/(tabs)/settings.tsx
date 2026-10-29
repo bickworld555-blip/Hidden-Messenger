@@ -70,7 +70,15 @@ export default function SettingsScreen() {
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
           <SettingRow icon="eye" title="Message previews" detail="Show message text in notifications" trailing={<Switch value={previews} onValueChange={setPreviews} trackColor={{ true: colors.primary }} />} />
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
-          <SettingRow icon="refresh-cw" title="Transfer chats" detail="Encrypted local device transfer" onPress={() => explainNotReady('Device transfer')} />
+          <SettingRow
+            icon="refresh-cw"
+            title="Transfer chats"
+            detail="Unavailable until E2EE is reviewed"
+            onPress={() => Alert.alert(
+              'Device transfer unavailable',
+              'No chat history or vault key is transferred. A reviewed E2EE protocol and native local-network transport must be approved and tested first.',
+            )}
+          />
         </View>
 
         <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>APP</Text>

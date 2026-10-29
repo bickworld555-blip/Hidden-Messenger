@@ -34,15 +34,20 @@ async function getOrCreateDatabaseKey() {
   const SecureStore = await import('expo-secure-store');
   const Crypto = await import('expo-crypto');
   const existingKey = await SecureStore.getItemAsync(KEY_ALIAS);
+  const secureStoreOptions = {
+    keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  };
   if (existingKey) {
     if (!/^[0-9a-f]{64}$/i.test(existingKey)) {
       throw new Error('Stored vault key has an invalid format. Refusing to open the database.');
     }
+    // Re-apply device-only Keychain accessibility to keys created by older builds.
+    await SecureStore.setItemAsync(KEY_ALIAS, existingKey, secureStoreOptions);
     return existingKey;
   }
 
   const key = toHex(await Crypto.getRandomBytesAsync(32));
-  await SecureStore.setItemAsync(KEY_ALIAS, key);
+  await SecureStore.setItemAsync(KEY_ALIAS, key, secureStoreOptions);
   return key;
 }
 

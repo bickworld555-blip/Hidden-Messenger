@@ -72,6 +72,7 @@ onlyBuiltDependencies:
   - '@swc/core'
   - esbuild
   - msw
+  - react-native-libsodium
   - unrs-resolver
 
 overrides:

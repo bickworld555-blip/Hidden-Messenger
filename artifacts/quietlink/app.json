@@ -13,18 +13,30 @@
       "resizeMode": "contain"
     },
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "deploymentTarget": "15.1"
     },
-    "android": {},
+    "android": {
+      "minSdkVersion": 24
+    },
     "web": {
       "favicon": "./assets/images/icon.png",
       "output": "static"
     },
     "plugins": [
       "expo-router",
-      ["expo-sqlite", { "useSQLCipher": true }],
-      "expo-secure-store"
+      [
+        "expo-sqlite",
+        {
+          "useSQLCipher": true,
+          "ios": { "useSQLCipher": true },
+          "android": { "useSQLCipher": true }
+        }
+      ],
+      ["expo-secure-store", { "configureAndroidBackup": true }],
+      ["react-native-libsodium", {}]
     ],
+    "newArchEnabled": true,
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
