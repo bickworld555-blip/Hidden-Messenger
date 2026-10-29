@@ -1,15 +1,17 @@
-# [Project name]
+# QuietLink Messenger
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+QuietLink is an original cross-platform private-messaging prototype with chat, call, status, and settings flows plus a fail-closed SQLCipher storage foundation.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/quietlink run dev` — run the Expo mobile preview
+- `pnpm --filter @workspace/quietlink run typecheck` — typecheck the mobile app
+- `pnpm --filter @workspace/api-server run dev` — run the shared API server
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- The mobile prototype does not require a server or database to render.
 
 ## Stack
 
@@ -22,23 +24,34 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/quietlink/app/` — Expo Router screens for conversations, chat, status, calls, and settings.
+- `artifacts/quietlink/context/MessageContext.tsx` — conversation state, native vault hydration, and an explicit memory-only preview fallback.
+- `artifacts/quietlink/storage/secureChatDb.ts` — SQLCipher-backed native text storage; it fails closed unless the native binary includes SQLCipher.
+- `artifacts/quietlink/docs/SECURITY_MODEL.md` — current prototype limits and production privacy architecture.
+- `artifacts/quietlink/constants/colors.ts` — light and dark QuietLink theme tokens.
+- `artifacts/api-server/src/lib/signaling.ts` — in-memory, two-minute WebSocket pairing/signaling gateway; no messages/media are accepted or persisted.
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- The mobile app uses original QuietLink branding and common chat interaction patterns, not copied WhatsApp assets or an exact brand replica.
+- The Expo Go/web preview uses in-memory demo chats only; a rebuilt native SQLCipher binary can persist text and conversation metadata. Neither mode sends or backs up messages.
+- SQLCipher is enabled as a native config plugin. Expo Go and web are intentionally not treated as encrypted storage environments.
+- The signaling gateway holds only temporary pairing state and WebRTC offer/answer/ICE messages in memory; the mobile client does not use it yet.
+- Do not use plain SQLite, AsyncStorage, or app logs as a fallback for chat contents when SQLCipher is unavailable.
+- Deletion must be described as best-effort key/data removal, never forensic-proof overwriting.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+The prototype includes a searchable chat list, local sample message composition, image selection for an in-memory preview, status browsing/composition, visual call screens, and a privacy/settings screen. The shared API has an ephemeral signal-only WebSocket gateway, but the mobile client does not use it. Real delivery, account identity, end-to-end protocol, WebRTC data channels, encrypted media storage, and device-to-device transfer remain unimplemented.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- The user asked for a cross-platform iOS/Android private messenger based on the attached chat-flow reference.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Changing `expo-sqlite`'s `useSQLCipher` setting requires a new native build; it cannot be enabled in Expo Go or by an OTA update.
+- The app must keep the explicit prototype disclosures until its encryption, transport, and storage have been implemented and independently tested.
 
 ## Pointers
 

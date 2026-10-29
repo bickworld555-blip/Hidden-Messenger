@@ -1,0 +1,1 @@
+- [Expo SQLite web preview](expo-sqlite-web-preview.md) — keep web storage stubs free of Expo SQLite imports; SQLCipher is native-only and Metro's WASM path can fail.
