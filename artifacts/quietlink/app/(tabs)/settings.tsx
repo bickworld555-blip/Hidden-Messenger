@@ -186,7 +186,7 @@ export default function SettingsScreen() {
             title="Sign out"
             detail="Revoke this device session"
             onPress={() => Alert.alert(
-              'Sign out of QuietLink?',
+              'Sign out of Hidden Messenger?',
               'This removes the saved device token and asks the API to revoke this session.',
               [
                 { text: 'Cancel', style: 'cancel' },
@@ -212,7 +212,7 @@ export default function SettingsScreen() {
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
           <SettingRow icon="lock" title="App lock" detail="Unavailable in this preview" onPress={() => explainNotReady('App lock')} trailing={<Text style={[styles.notAvailable, { color: colors.mutedForeground }]}>Not set</Text>} />
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
-          <SettingRow icon="eye" title="Message previews" detail="Always hidden; alert payloads stay generic" onPress={() => Alert.alert('Message privacy', 'QuietLink local notifications never include chat text or media. Remote push delivery is not connected.')} trailing={<Feather name="lock" size={14} color={colors.mutedForeground} />} />
+          <SettingRow icon="eye" title="Message previews" detail="Always hidden; alert payloads stay generic" onPress={() => Alert.alert('Message privacy', 'Hidden Messenger local notifications never include chat text or media. Remote push delivery is not connected.')} trailing={<Feather name="lock" size={14} color={colors.mutedForeground} />} />
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
           <SettingRow
             icon="refresh-cw"
@@ -273,7 +273,7 @@ export default function SettingsScreen() {
             trailing={<Switch value={settings.localNotificationsEnabled} onValueChange={(value) => void handleLocalNotifications(value)} trackColor={{ true: colors.primary }} />}
           />
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
-          <SettingRow icon="send" title="Remote push delivery" detail="Not connected · no push sender is configured" onPress={() => Alert.alert('Remote alerts unavailable', 'QuietLink has no push-delivery service or device-token registration endpoint yet. Local notifications can be tested below; incoming calls and messages cannot wake the app.')} />
+          <SettingRow icon="send" title="Remote push delivery" detail="Not connected · no push sender is configured" onPress={() => Alert.alert('Remote alerts unavailable', 'Hidden Messenger has no push-delivery service or device-token registration endpoint yet. Local notifications can be tested below; incoming calls and messages cannot wake the app.')} />
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
           <SettingRow icon="bell" title="Test local alert" detail="Schedule a generic device notification" onPress={() => void previewLocalNotification()} />
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
@@ -328,7 +328,7 @@ export default function SettingsScreen() {
               : 'Demo history is held in app memory and is not transmitted. Local media import requires SQLCipher. E2EE sending, voice recording, real calls, remote push, and device transfer are not connected.'}
           </Text>
         </View>
-        <Text style={[styles.version, { color: colors.mutedForeground }]}>QuietLink · Private by design, transparent by default</Text>
+        <Text style={[styles.version, { color: colors.mutedForeground }]}>Hidden Messenger · Private by design, transparent by default</Text>
       </View>
     </ScrollView>
   );

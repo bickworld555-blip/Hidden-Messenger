@@ -66,7 +66,7 @@ export default function CallScreen() {
           'Call permission not granted',
           microphone.status === 'unavailable' || camera?.status === 'unavailable'
             ? 'Use the native iOS or Android app to request call permissions.'
-            : 'Allow microphone and camera access in QuietLink settings before trying a call.',
+            : 'Allow microphone and camera access in Hidden Messenger settings before trying a call.',
           [
             { text: 'Not now', style: 'cancel' },
             { text: 'Open settings', onPress: () => { void Linking.openSettings(); } },
@@ -83,7 +83,7 @@ export default function CallScreen() {
   const acceptPreview = async () => {
     if (!await requestCallPermissions()) return;
     setStage('active');
-    Alert.alert('Call preview only', 'Permissions are allowed, but QuietLink has no connected audio or video call transport. Nothing is captured or sent.');
+    Alert.alert('Call preview only', 'Permissions are allowed, but Hidden Messenger has no connected audio or video call transport. Nothing is captured or sent.');
   };
 
   const endCallPreview = () => {

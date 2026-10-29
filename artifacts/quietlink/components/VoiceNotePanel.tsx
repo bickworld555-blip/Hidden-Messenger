@@ -72,7 +72,7 @@ export function VoiceNotePanel({ onCheckMicrophone, onClose }: { onCheckMicropho
         <Text style={[styles.locked, { color: colors.mutedForeground }]}>Locked</Text>
       </View>
       <Text style={[styles.disclosure, { color: colors.mutedForeground }]}>
-        QuietLink won’t record to a plaintext temporary file. Voice notes stay locked until encrypted microphone capture and playback are available.
+        Hidden Messenger won’t record to a plaintext temporary file. Voice notes stay locked until encrypted microphone capture and playback are available.
       </Text>
       <Pressable onPress={onCheckMicrophone} style={styles.permissionLink} accessibilityRole="button">
         <Feather name="mic" size={13} color={colors.primary} />

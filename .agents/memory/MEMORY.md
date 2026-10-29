@@ -1,2 +1,2 @@
 - [Expo SQLite web preview](expo-sqlite-web-preview.md) — keep web storage stubs free of Expo SQLite imports; SQLCipher is native-only and Metro's WASM path can fail.
-- [QuietLink E2EE selection](quietlink-e2ee-selection.md) — keep sending locked until a reviewed, mobile-compatible protocol is selected; do not use custom crypto.
+- [Hidden Messenger E2EE selection](quietlink-e2ee-selection.md) — keep sending locked until a reviewed, mobile-compatible protocol is selected; do not use custom crypto.

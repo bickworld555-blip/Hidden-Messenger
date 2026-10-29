@@ -19,7 +19,7 @@ Notifications.setNotificationHandler({
 export async function configureLocalNotifications() {
   if (Platform.OS !== 'android') return;
   await Notifications.setNotificationChannelAsync('quietlink-alerts', {
-    name: 'QuietLink alerts',
+    name: 'Hidden Messenger alerts',
     importance: Notifications.AndroidImportance.HIGH,
     vibrationPattern: [0, 180, 110, 180],
     sound: 'default',
@@ -37,7 +37,7 @@ export async function scheduleLocalNotificationTest() {
   await configureLocalNotifications();
   await Notifications.scheduleNotificationAsync({
     content: {
-      title: 'QuietLink alert test',
+      title: 'Hidden Messenger alert test',
       body: 'Local alerts are enabled. Message contents stay hidden.',
       data: { type: 'settings-test' },
       sound: 'default',
@@ -60,7 +60,7 @@ export async function scheduleQuietLinkAlert(input: {
   const isCall = input.type === 'call';
   await Notifications.scheduleNotificationAsync({
     content: {
-      title: 'QuietLink',
+      title: 'Hidden Messenger',
       body: isCall ? 'Incoming call' : 'New message',
       data: isCall
         ? { type: 'call', callId: input.id }

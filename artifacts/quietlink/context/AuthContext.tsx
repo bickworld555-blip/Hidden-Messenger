@@ -128,7 +128,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       await SecureStore.deleteItemAsync(SESSION_TOKEN_KEY, secureStoreOptions).catch(() => undefined);
       await SecureStore.deleteItemAsync(SESSION_PHONE_KEY, secureStoreOptions).catch(() => undefined);
-      throw new Error("QuietLink could not save the session in secure device storage.");
+      throw new Error("Hidden Messenger could not save the session in secure device storage.");
     }
     setSession({ phone: response.phone });
     setStatus("signedIn");

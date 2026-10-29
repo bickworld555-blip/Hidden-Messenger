@@ -1,6 +1,6 @@
 kind = "mobile"
 previewPath = "/"
-title = "QuietLink Messenger"
+title = "Hidden Messenger"
 description = "A cross-platform private messaging app prototype for people who want familiar chat, call, status, and media-sharing flows with encrypted local history and transparent privacy controls."
 version = "1.0.0"
 id = "artifacts/quietlink"

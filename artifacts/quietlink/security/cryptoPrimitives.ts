@@ -21,7 +21,7 @@ export type SodiumAeadPacket = Readonly<{
 
 async function loadNativeSodium() {
   if (Platform.OS !== 'ios' && Platform.OS !== 'android') {
-    throw new Error('QuietLink cryptographic primitives require a native iOS or Android build.');
+    throw new Error('Hidden Messenger cryptographic primitives require a native iOS or Android build.');
   }
   return import('react-native-libsodium');
 }

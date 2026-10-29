@@ -39,7 +39,7 @@ export default function NewChatScreen() {
             <Avatar initials={contact.initials} color={contact.color} size={48} />
             <View style={[styles.copy, { borderBottomColor: colors.border }]}>
               <Text style={[styles.name, { color: colors.foreground }]}>{contact.name}</Text>
-              <Text style={[styles.detail, { color: colors.mutedForeground }]}>QuietLink ID not verified</Text>
+              <Text style={[styles.detail, { color: colors.mutedForeground }]}>Hidden Messenger ID not verified</Text>
             </View>
             <Feather name="message-circle" size={19} color={colors.primary} />
           </Pressable>

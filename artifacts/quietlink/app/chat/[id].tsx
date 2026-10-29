@@ -81,11 +81,11 @@ export default function ChatScreen() {
   const checkMicrophoneForVoiceNotes = async () => {
     const permission = await requestDevicePermission('microphone');
     if (permission.status === 'granted') {
-      Alert.alert('Microphone allowed', 'Voice recording remains locked until QuietLink can encrypt microphone data without creating a plaintext temporary file.');
+      Alert.alert('Microphone allowed', 'Voice recording remains locked until Hidden Messenger can encrypt microphone data without creating a plaintext temporary file.');
     } else if (permission.status === 'unavailable') {
       Alert.alert('Microphone unavailable', 'Request microphone access from the native iOS or Android app. This web preview cannot record securely.');
     } else if (permission.status === 'denied' && !permission.canAskAgain) {
-      Alert.alert('Microphone access denied', 'Open QuietLink in device settings to allow microphone access.');
+      Alert.alert('Microphone access denied', 'Open Hidden Messenger in device settings to allow microphone access.');
     } else {
       Alert.alert('Microphone access needed', 'Allow microphone access to prepare for voice notes. Recording is still locked until encrypted capture is available.');
     }

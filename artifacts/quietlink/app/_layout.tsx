@@ -38,7 +38,7 @@ function RootLayoutNav({ signedIn }: { signedIn: boolean }) {
           pathname: '/call/[id]',
           params: {
             id: data.callId,
-            name: typeof data.name === 'string' ? data.name : 'QuietLink contact',
+            name: typeof data.name === 'string' ? data.name : 'Hidden Messenger contact',
             mode: data.mode === 'video' ? 'video' : 'audio',
             stage: 'incoming',
           },

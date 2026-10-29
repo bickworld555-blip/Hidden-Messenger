@@ -1,6 +1,6 @@
-# QuietLink Messenger
+# Hidden Messenger
 
-QuietLink is an original cross-platform private-messaging prototype with chat, call, status, and settings flows plus a fail-closed SQLCipher storage foundation.
+Hidden Messenger is an original cross-platform private-messaging prototype with chat, call, status, and settings flows plus a fail-closed SQLCipher storage foundation.
 
 ## Run & Operate
 
@@ -29,12 +29,12 @@ QuietLink is an original cross-platform private-messaging prototype with chat, c
 - `artifacts/quietlink/storage/secureChatDb.ts` — SQLCipher-backed native text storage; it fails closed unless the native binary includes SQLCipher.
 - `artifacts/quietlink/security/secureMessaging.ts` — E2EE adapter/transport boundary; sending stays locked until both are installed.
 - `artifacts/quietlink/docs/SECURITY_MODEL.md` — current prototype limits and production privacy architecture.
-- `artifacts/quietlink/constants/colors.ts` — light and dark QuietLink theme tokens.
+- `artifacts/quietlink/constants/colors.ts` — light and dark Hidden Messenger theme tokens.
 - `artifacts/api-server/src/lib/signaling.ts` — in-memory, two-minute WebSocket pairing/signaling gateway; no messages/media are accepted or persisted.
 
 ## Architecture decisions
 
-- The mobile app uses original QuietLink branding and common chat interaction patterns, not copied WhatsApp assets or an exact brand replica.
+- The mobile app uses original Hidden Messenger branding and common chat interaction patterns, not copied WhatsApp assets or an exact brand replica.
 - The Expo Go/web preview uses in-memory demo chats only; a rebuilt native SQLCipher binary can persist text and conversation metadata. Neither mode sends or backs up messages.
 - SQLCipher is enabled as a native config plugin. Expo Go and web are intentionally not treated as encrypted storage environments.
 - The signaling gateway holds only temporary pairing state and WebRTC offer/answer/ICE messages in memory; the mobile client does not use it yet.

@@ -191,7 +191,7 @@ router.post("/auth/otp/request", async (req, res) => {
   ipRequestWindows.set(ipHash, recordRequest(ipWindow, now));
 
   const code = randomInt(0, 1_000_000).toString().padStart(6, "0");
-  const message = `Your QuietLink verification code is: ${code}. It expires in 5 minutes.`;
+  const message = `Your Hidden Messenger verification code is: ${code}. It expires in 5 minutes.`;
   let providerResponse: globalThis.Response;
   let payload: unknown;
   try {

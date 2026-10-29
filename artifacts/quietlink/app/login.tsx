@@ -107,7 +107,7 @@ export default function LoginScreen() {
           <View style={[styles.brandMark, { backgroundColor: colors.accent }]}>
             <Feather name="message-circle" size={25} color={colors.primary} />
           </View>
-          <Text style={[styles.brand, { color: colors.foreground }]}>QuietLink</Text>
+          <Text style={[styles.brand, { color: colors.foreground }]}>Hidden Messenger</Text>
           <Text style={[styles.tagline, { color: colors.mutedForeground }]}>Private conversations, kept simple</Text>
 
           <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -243,7 +243,7 @@ export default function LoginScreen() {
           <View style={styles.privacyNote}>
             <Feather name="lock" size={13} color={colors.primary} />
             <Text style={[styles.privacyText, { color: colors.mutedForeground }]}>
-              Your code is verified by QuietLink’s API and is never stored in the app. Chat sending remains locked until E2EE is reviewed.
+              Your code is verified by Hidden Messenger’s API and is never stored in the app. Chat sending remains locked until E2EE is reviewed.
             </Text>
           </View>
         </View>

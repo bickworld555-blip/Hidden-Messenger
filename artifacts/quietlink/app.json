@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "QuietLink Messenger",
+    "name": "Hidden Messenger",
     "slug": "quietlink",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -14,7 +14,11 @@
     },
     "ios": {
       "supportsTablet": false,
-      "deploymentTarget": "15.1"
+      "deploymentTarget": "15.1",
+      "infoPlist": {
+        "CFBundleName": "Hidden Messenger",
+        "CFBundleDisplayName": "Hidden Messenger"
+      }
     },
     "android": {
       "minSdkVersion": 24
@@ -50,7 +54,7 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "QuietLink uses the microphone for voice notes and voice calls.",
+          "microphonePermission": "Hidden Messenger requests microphone access only for audio features you choose.",
           "enableBackgroundPlayback": false,
           "enableBackgroundRecording": false
         }
@@ -58,8 +62,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "QuietLink accesses selected photos and videos only when you choose an attachment.",
-          "cameraPermission": "QuietLink uses the camera when you explicitly choose a camera feature.",
+          "photosPermission": "Hidden Messenger accesses selected photos and videos only when you choose an attachment.",
+          "cameraPermission": "Hidden Messenger requests camera access only when you choose a camera feature.",
           "microphonePermission": false
         }
       ],
