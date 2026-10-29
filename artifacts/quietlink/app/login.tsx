@@ -146,7 +146,7 @@ export default function LoginScreen() {
                   textContentType="telephoneNumber"
                   autoComplete="tel"
                   maxLength={13}
-                  editable={!busy && isNativeAuthAvailable}
+                  editable={!busy}
                   style={[styles.phoneField, { color: colors.foreground }]}
                   accessibilityLabel="Bangladesh mobile number"
                 />
@@ -213,7 +213,7 @@ export default function LoginScreen() {
               <View style={[styles.notice, { backgroundColor: colors.secondary }]}>
                 <Feather name="smartphone" size={16} color={colors.primary} />
                 <Text style={[styles.noticeText, { color: colors.secondaryForeground }]}>
-                  Secure sign-in is available in the iOS and Android apps. This web preview cannot store an auth token safely.
+                  Enter a number to preview this screen. OTP sign-in stays disabled here because browsers cannot store an auth token safely.
                 </Text>
               </View>
             ) : null}
