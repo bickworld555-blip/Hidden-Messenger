@@ -36,7 +36,7 @@ function SettingRow({
 export default function SettingsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { storageStatus, storageError } = useMessages();
+  const { storageStatus, storageError, messagingStatus, resetEncryptedVault } = useMessages();
   const [previews, setPreviews] = React.useState(true);
   const explainNotReady = (feature: string) => Alert.alert(feature, 'This feature is not connected in the prototype. Messages are never sent to a messaging network.');
   return (
@@ -54,7 +54,17 @@ export default function SettingsScreen() {
 
         <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>PRIVACY & SECURITY</Text>
         <View style={[styles.group, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <SettingRow icon="shield" title="Encryption status" detail={storageStatus === 'encrypted' ? 'SQLCipher vault active for text' : 'Encrypted vault unavailable'} onPress={() => Alert.alert('Encryption status', storageError ?? 'Text storage is encrypted only when running a native build with SQLCipher enabled. Network and media encryption are not implemented.')} />
+          <SettingRow
+            icon="shield"
+            title="Encryption status"
+            detail={storageStatus === 'encrypted' ? 'SQLCipher local vault · E2EE pending' : 'Local vault unavailable · E2EE pending'}
+            onPress={() => Alert.alert(
+              'Encryption status',
+              `${storageError ? `${storageError}\n\n` : ''}Local vault: ${storageStatus === 'encrypted' ? 'SQLCipher active' : 'unavailable'}. End-to-end protocol: not configured; message sending is locked. Media and device transfer are unavailable.`,
+            )}
+          />
+          <View style={[styles.separator, { backgroundColor: colors.border }]} />
+          <SettingRow icon="message-square" title="Message sending" detail={messagingStatus === 'locked' ? 'Locked until E2EE review' : 'Encrypted transport ready'} onPress={() => Alert.alert('Message sending', messagingStatus === 'locked' ? 'No reviewed E2EE protocol and encrypted transport are installed. Messages and media cannot be sent.' : 'Encrypted transport is configured.')} />
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
           <SettingRow icon="lock" title="App lock" detail="Unavailable in this preview" onPress={() => explainNotReady('App lock')} trailing={<Text style={[styles.notAvailable, { color: colors.mutedForeground }]}>Not set</Text>} />
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
@@ -68,14 +78,41 @@ export default function SettingsScreen() {
           <SettingRow icon="image" title="Storage and media" detail="Media encryption is not connected" onPress={() => explainNotReady('Storage and media')} />
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
           <SettingRow icon="help-circle" title="Privacy notes" detail="What the prototype does and does not protect" onPress={() => explainNotReady('Privacy notes')} />
+          {storageStatus === 'encrypted' ? (
+            <>
+              <View style={[styles.separator, { backgroundColor: colors.border }]} />
+              <SettingRow
+                icon="trash-2"
+                title="Reset local vault"
+                detail="Delete local chats and rotate the vault key"
+                onPress={() => Alert.alert(
+                  'Reset the local vault?',
+                  'This permanently deletes local chat history and removes the current vault key before creating a new empty vault. Flash storage, backups, and OS caches cannot be guaranteed erased. App uninstall does not run this action.',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Reset vault',
+                      style: 'destructive',
+                      onPress: () => {
+                        void resetEncryptedVault().then(
+                          () => Alert.alert('Vault reset', 'A new empty encrypted vault is ready. This was best-effort key deletion, not a forensic-proof wipe.'),
+                          () => Alert.alert('Reset failed', 'The vault could not be safely reset. Check the encryption status before continuing.'),
+                        );
+                      },
+                    },
+                  ],
+                )}
+              />
+            </>
+          ) : null}
         </View>
 
         <View style={[styles.disclosure, { backgroundColor: colors.accent }]}>
           <Feather name="alert-triangle" size={16} color={colors.primary} />
           <Text style={[styles.disclosureText, { color: colors.accentForeground }]}>
             {storageStatus === 'encrypted'
-              ? 'Text is stored in the local SQLCipher vault. Media encryption, network delivery, and device transfer are not connected. Secure deletion and forensic-proof erasure cannot be guaranteed on flash storage.'
-              : 'Messages are held in app memory, not encrypted at rest, and are not transmitted. Secure deletion and forensic-proof erasure cannot be guaranteed on flash storage.'}
+              ? 'Demo history is stored in the local SQLCipher vault. E2EE is not configured, so sending is locked. Media encryption and device transfer are not connected. Flash storage and backups cannot be reliably shredded.'
+              : 'Demo history is held in app memory and is not transmitted. E2EE is not configured, so sending is locked. Flash storage and backups cannot be reliably shredded.'}
           </Text>
         </View>
         <Text style={[styles.version, { color: colors.mutedForeground }]}>QuietLink · Private by design, transparent by default</Text>

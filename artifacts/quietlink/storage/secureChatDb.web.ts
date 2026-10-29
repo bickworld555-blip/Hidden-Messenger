@@ -17,6 +17,10 @@ export async function openSecureChatDatabase(): Promise<never> {
   throw unavailable();
 }
 
+export async function shouldSeedDemoContent(): Promise<never> {
+  throw unavailable();
+}
+
 export async function saveLocalMessage(): Promise<never> {
   throw unavailable();
 }

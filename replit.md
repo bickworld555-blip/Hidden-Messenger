@@ -27,6 +27,7 @@ QuietLink is an original cross-platform private-messaging prototype with chat, c
 - `artifacts/quietlink/app/` — Expo Router screens for conversations, chat, status, calls, and settings.
 - `artifacts/quietlink/context/MessageContext.tsx` — conversation state, native vault hydration, and an explicit memory-only preview fallback.
 - `artifacts/quietlink/storage/secureChatDb.ts` — SQLCipher-backed native text storage; it fails closed unless the native binary includes SQLCipher.
+- `artifacts/quietlink/security/secureMessaging.ts` — E2EE adapter/transport boundary; sending stays locked until both are installed.
 - `artifacts/quietlink/docs/SECURITY_MODEL.md` — current prototype limits and production privacy architecture.
 - `artifacts/quietlink/constants/colors.ts` — light and dark QuietLink theme tokens.
 - `artifacts/api-server/src/lib/signaling.ts` — in-memory, two-minute WebSocket pairing/signaling gateway; no messages/media are accepted or persisted.
@@ -37,6 +38,8 @@ QuietLink is an original cross-platform private-messaging prototype with chat, c
 - The Expo Go/web preview uses in-memory demo chats only; a rebuilt native SQLCipher binary can persist text and conversation metadata. Neither mode sends or backs up messages.
 - SQLCipher is enabled as a native config plugin. Expo Go and web are intentionally not treated as encrypted storage environments.
 - The signaling gateway holds only temporary pairing state and WebRTC offer/answer/ICE messages in memory; the mobile client does not use it yet.
+- The chat composer and media actions remain disabled until a reviewed E2EE implementation and encrypted transport are selected and connected.
+- In-app vault reset deletes the current database/key and opens a new empty vault best-effort; app uninstall cannot trigger app cleanup code.
 - Do not use plain SQLite, AsyncStorage, or app logs as a fallback for chat contents when SQLCipher is unavailable.
 - Deletion must be described as best-effort key/data removal, never forensic-proof overwriting.
 

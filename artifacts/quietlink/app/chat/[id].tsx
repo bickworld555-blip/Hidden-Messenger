@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, FlatList, Image, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Feather } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/Avatar';
@@ -38,7 +37,7 @@ export default function ChatScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ id: string }>();
   const id = String(params.id ?? '');
-  const { threads, messages, sendMessage, sendPhoto, deleteThread, markRead, storageStatus } = useMessages();
+  const { threads, messages, sendMessage, deleteThread, markRead, storageStatus, messagingStatus } = useMessages();
   const thread = threads.find((item) => item.id === id);
   const conversationMessages = useMemo(() => messages.filter((message) => message.conversationId === id), [messages, id]);
   const [draft, setDraft] = useState('');
@@ -55,10 +54,10 @@ export default function ChatScreen() {
     );
   }
 
-  const onSend = () => {
-    if (!draft.trim()) return;
-    sendMessage(id, draft);
-    setDraft('');
+  const onSend = async () => {
+    if (!draft.trim() || messagingStatus !== 'ready') return;
+    const sent = await sendMessage(id, draft);
+    if (sent) setDraft('');
   };
 
   const onDelete = () => Alert.alert(
@@ -70,19 +69,13 @@ export default function ChatScreen() {
     ],
   );
 
-  const attachmentAction = async (label: string) => {
+  const attachmentAction = (label: string) => {
     setAttachmentOpen(false);
-    if (label === 'Photo') {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('Photo access needed', 'Allow photo access to choose an image for this local preview.');
-        return;
-      }
-      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: false, quality: 0.8 });
-      if (!result.canceled && result.assets[0]) sendPhoto(id, result.assets[0].uri);
+    if (messagingStatus !== 'ready') {
+      Alert.alert('Sharing locked', 'Media sending is disabled until reviewed end-to-end encryption and encrypted media storage are configured.');
       return;
     }
-    Alert.alert(label, 'Media sharing is part of the UI preview; files are not uploaded or stored.');
+    Alert.alert(label, 'Media encryption and secure transport are not configured, so sharing remains unavailable.');
   };
 
   return (
@@ -114,9 +107,9 @@ export default function ChatScreen() {
       <View style={[styles.prototypeBanner, { backgroundColor: colors.accent }]}>
         <Feather name="lock" size={13} color={colors.primary} />
         <Text style={[styles.prototypeText, { color: colors.accentForeground }]}>
-          {storageStatus === 'encrypted'
-            ? 'Text saved in the encrypted vault · media preview only'
-            : 'Preview conversation · nothing is sent or saved'}
+          {messagingStatus === 'locked'
+            ? `Demo history · sending locked pending E2EE review${storageStatus === 'encrypted' ? ' · local vault active' : ''}`
+            : 'Secure messaging enabled'}
         </Text>
       </View>
 
@@ -148,26 +141,27 @@ export default function ChatScreen() {
       ) : null}
 
       <View style={[styles.composerWrap, { paddingBottom: Math.max(insets.bottom, Platform.OS === 'web' ? 34 : 8), borderTopColor: colors.border, backgroundColor: colors.background }]}>
-        <Pressable onPress={() => setAttachmentOpen((value) => !value)} style={styles.composerIcon} accessibilityLabel="Open attachment options">
+        <Pressable onPress={() => setAttachmentOpen((value) => !value)} style={styles.composerIcon} disabled={messagingStatus !== 'ready'} accessibilityLabel="Open attachment options">
           <Feather name={attachmentOpen ? 'x' : 'plus'} size={22} color={colors.primary} />
         </Pressable>
         <TextInput
           value={draft}
           onChangeText={setDraft}
-          placeholder="Message"
+          placeholder={messagingStatus === 'locked' ? 'Sending locked until E2EE is reviewed' : 'Message'}
           placeholderTextColor={colors.mutedForeground}
           style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]}
           multiline
           maxLength={2000}
+          editable={messagingStatus === 'ready'}
           accessibilityLabel="Message"
           onFocus={() => setAttachmentOpen(false)}
         />
         {draft.trim() ? (
-          <Pressable onPress={onSend} style={[styles.sendButton, { backgroundColor: colors.primary }]} accessibilityLabel="Send message">
+          <Pressable onPress={onSend} disabled={messagingStatus !== 'ready'} style={[styles.sendButton, { backgroundColor: messagingStatus === 'ready' ? colors.primary : colors.muted }]} accessibilityLabel="Send message">
             <Feather name="arrow-up" size={19} color={colors.primaryForeground} />
           </Pressable>
         ) : (
-          <Pressable onPress={() => attachmentAction('Voice message')} style={styles.composerIcon} accessibilityLabel="Record voice message">
+          <Pressable onPress={() => attachmentAction('Voice message')} style={styles.composerIcon} disabled={messagingStatus !== 'ready'} accessibilityLabel="Record voice message">
             <Feather name="mic" size={20} color={colors.primary} />
           </Pressable>
         )}

@@ -2,9 +2,9 @@
 
 ## Current build status
 
-The app does not send messages, make real calls, publish statuses, or transfer data to another device. The shared API includes a short-lived WebSocket signaling gateway, but the mobile app does not connect to it yet. In Expo Go, web, or any binary without SQLCipher, sample conversations and messages stay in React memory and disappear on reload. A rebuilt native iOS/Android binary configured with SQLCipher stores text messages and conversation metadata in the local encrypted vault.
+The app does not send messages, make real calls, publish statuses, or transfer data to another device. The mobile composer and media actions stay locked because no reviewed E2EE protocol or encrypted transport is installed. `security/secureMessaging.ts` defines a fail-closed adapter boundary; it does not implement cryptography. The API includes a short-lived WebSocket signaling gateway, but the mobile app does not connect to it yet. In Expo Go, web, or any binary without SQLCipher, demo conversations stay in React memory and disappear on reload. A rebuilt native iOS/Android binary configured with SQLCipher stores demo text and conversation metadata in the local encrypted vault.
 
-The chat provider opens the vault before showing screens. The adapter checks for SQLCipher and fails closed rather than using plaintext SQLite. Selected photos are displayed from a temporary device URI in app memory; media files are not encrypted or persisted by this build.
+The chat provider opens the vault before showing screens. The adapter checks for SQLCipher and fails closed rather than using plaintext SQLite. The secure-message boundary will only pass protocol-produced ciphertext envelopes to a configured transport. No engine or transport is installed, so sends remain disabled. Media selection and transfer remain disabled; media files are not encrypted or persisted by this build.
 
 ## Target architecture
 
@@ -27,15 +27,15 @@ Mobile client A  <---- end-to-end encrypted payloads ---->  Mobile client B
 
 The app must not claim forensic-proof deletion. Flash storage controllers, filesystem snapshots, app backups, operating-system caches, and journal behavior can leave data outside an app's control. Overwriting a file is not a reliable way to erase flash storage. A product can delete records and media, remove temporary data it owns, and destroy the vault key as best-effort cryptographic erasure. The UI must describe those limits and treat backup/export copies separately.
 
-The delete action removes message/conversation rows from SQLCipher when the native encrypted vault is active, or removes them from memory in preview mode. It is not a secure wipe.
+The delete action removes message/conversation rows from SQLCipher when the native encrypted vault is active, or removes them from memory in preview mode. The settings screen offers an explicit vault reset that deletes the database and current key, then creates a new empty vault. This is best-effort cryptographic erasure, not a secure wipe; the app cannot run cleanup code when uninstalled.
 
 ## Native build steps for the encrypted vault
 
 1. Keep `expo-sqlite` configured with `useSQLCipher: true` and build a new native iOS/Android binary. A JavaScript reload or Expo Go session cannot enable SQLCipher.
-2. Store a random 32-byte database key in platform secure storage. Do not derive it from a user PIN without a reviewed KDF and a recovery plan.
+2. Store a random 32-byte database key in platform secure storage. Expo SecureStore maps to iOS Keychain and Android Keystore-backed storage. Do not derive it from a user PIN without a reviewed KDF and a recovery plan.
 3. Open the database, verify `PRAGMA cipher_version` is present, set `PRAGMA key` immediately, and perform a read before migrations. Refuse to continue if the cipher check or read fails.
 4. Apply schema migrations transactionally. Use parameterized statements for user-controlled values; only the validated local hexadecimal key is interpolated in the SQLCipher PRAGMA.
-5. Verify fresh install, app restart, wrong-key handling, migration, device restore, and deletion behavior on physical Android and iOS devices. The current provider stores text only; selected media is still temporary.
+5. Verify fresh install, app restart, wrong-key handling, reset, device restore, and deletion behavior on physical Android and iOS devices. The current provider stores demo text only; selected media is not enabled.
 6. Add a separate audited media encryption layer, disable sensitive OS backups where appropriate, and review crash reporting, notification text, screenshots/app switcher previews, memory lifetime, and logs before shipping.
 7. Complete a third-party security review and publish a threat model before making production privacy or security claims.
 

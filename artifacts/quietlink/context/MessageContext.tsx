@@ -62,6 +62,7 @@ type MessageContextValue = {
   messages: ChatMessage[];
   storageStatus: 'loading' | 'encrypted' | 'memory-only';
   storageError: string | null;
+  messagingStatus: 'locked' | 'ready';
   sendMessage: (conversationId: string, text: string) => Promise<boolean>;
   sendPhoto: (conversationId: string, imageUri: string) => boolean;
   startConversation: (thread: ChatThread) => void;
@@ -150,6 +151,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     messages,
     storageStatus,
     storageError,
+    messagingStatus: isSecureMessagingReady() ? 'ready' : 'locked',
     sendMessage: async (conversationId, text) => {
       const cleanText = text.trim();
       if (!cleanText || !isSecureMessagingReady()) return false;
