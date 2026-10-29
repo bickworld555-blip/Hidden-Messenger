@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import * as Audio from 'expo-audio';
 import * as ImagePicker from 'expo-image-picker';
-import * as Notifications from 'expo-notifications';
+import { getOptionalNotificationsModule } from '@/services/quietLinkNotifications';
 
 export type DevicePermissionName = 'camera' | 'microphone' | 'gallery' | 'notifications';
 export type DevicePermissionState = {
@@ -35,8 +35,11 @@ export async function getDevicePermission(name: DevicePermissionName): Promise<D
         return normalizePermission(await Audio.getRecordingPermissionsAsync());
       case 'gallery':
         return normalizePermission(await ImagePicker.getMediaLibraryPermissionsAsync());
-      case 'notifications':
+      case 'notifications': {
+        const Notifications = await getOptionalNotificationsModule();
+        if (!Notifications?.getPermissionsAsync) return unavailable;
         return normalizePermission(await Notifications.getPermissionsAsync());
+      }
     }
   } catch {
     return unavailable;
@@ -53,8 +56,11 @@ export async function requestDevicePermission(name: DevicePermissionName): Promi
         return normalizePermission(await Audio.requestRecordingPermissionsAsync());
       case 'gallery':
         return normalizePermission(await ImagePicker.requestMediaLibraryPermissionsAsync());
-      case 'notifications':
+      case 'notifications': {
+        const Notifications = await getOptionalNotificationsModule();
+        if (!Notifications?.requestPermissionsAsync) return unavailable;
         return normalizePermission(await Notifications.requestPermissionsAsync());
+      }
     }
   } catch {
     return unavailable;
