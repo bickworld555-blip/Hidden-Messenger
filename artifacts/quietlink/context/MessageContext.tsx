@@ -7,8 +7,11 @@ import {
   listLocalConversations,
   openSecureChatDatabase,
   saveLocalMessage,
+  shouldSeedDemoContent,
   updateLocalUnread,
+  destroyLocalVault,
 } from '@/storage/secureChatDb';
+import { isSecureMessagingReady, sendEncryptedText } from '@/security/secureMessaging';
 
 export type ChatMessage = {
   id: string;
@@ -59,11 +62,12 @@ type MessageContextValue = {
   messages: ChatMessage[];
   storageStatus: 'loading' | 'encrypted' | 'memory-only';
   storageError: string | null;
-  sendMessage: (conversationId: string, text: string) => void;
-  sendPhoto: (conversationId: string, imageUri: string) => void;
+  sendMessage: (conversationId: string, text: string) => Promise<boolean>;
+  sendPhoto: (conversationId: string, imageUri: string) => boolean;
   startConversation: (thread: ChatThread) => void;
   deleteThread: (conversationId: string) => void;
   markRead: (conversationId: string) => void;
+  resetEncryptedVault: () => Promise<void>;
 };
 
 const MessageContext = createContext<MessageContextValue | null>(null);
@@ -80,7 +84,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
       try {
         await openSecureChatDatabase();
         let storedThreads = await listLocalConversations();
-        if (storedThreads.length === 0) {
+        if (storedThreads.length === 0 && await shouldSeedDemoContent()) {
           const seedTime = Date.now();
           for (const thread of initialThreads) {
             await ensureLocalConversation({
@@ -146,9 +150,9 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     messages,
     storageStatus,
     storageError,
-    sendMessage: (conversationId, text) => {
+    sendMessage: async (conversationId, text) => {
       const cleanText = text.trim();
-      if (!cleanText) return;
+      if (!cleanText || !isSecureMessagingReady()) return false;
       const now = new Date();
       const time = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
       const message: ChatMessage = {
@@ -159,13 +163,19 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         outgoing: true,
         status: 'sent',
       };
-      setMessages((current) => [...current, message]);
-      setThreads((current) => current.map((thread) => thread.id === conversationId
-        ? { ...thread, lastMessage: cleanText, time, unread: 0 }
-        : thread));
-      if (storageStatus === 'encrypted') {
-        const thread = threads.find((item) => item.id === conversationId);
-        if (thread) {
+      try {
+        await sendEncryptedText({
+          conversationId,
+          messageId: message.id,
+          plaintext: cleanText,
+        });
+        setMessages((current) => [...current, message]);
+        setThreads((current) => current.map((thread) => thread.id === conversationId
+          ? { ...thread, lastMessage: cleanText, time, unread: 0 }
+          : thread));
+        if (storageStatus === 'encrypted') {
+          const thread = threads.find((item) => item.id === conversationId);
+          if (thread) {
           void ensureLocalConversation({
             id: thread.id,
             title: thread.name,
@@ -188,24 +198,16 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
             setStorageStatus('memory-only');
             setStorageError(error instanceof Error ? error.message : 'Could not persist the message to the encrypted vault.');
           });
+          }
         }
+        return true;
+      } catch (error) {
+        setStorageError(error instanceof Error ? error.message : 'Encrypted message delivery is unavailable.');
+        return false;
       }
     },
-    sendPhoto: (conversationId, imageUri) => {
-      const now = new Date();
-      const time = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-      setMessages((current) => [...current, {
-        id: `${now.getTime()}-${Math.random().toString(36).slice(2, 7)}`,
-        conversationId,
-        text: 'Photo',
-        imageUri,
-        time,
-        outgoing: true,
-        status: 'sent',
-      }]);
-      setThreads((current) => current.map((thread) => thread.id === conversationId
-        ? { ...thread, lastMessage: 'Photo', time, unread: 0 }
-        : thread));
+    sendPhoto: (_conversationId, _imageUri) => {
+      return false;
     },
     startConversation: (thread) => {
       setThreads((current) => current.some((item) => item.id === thread.id) ? current : [thread, ...current]);
@@ -247,6 +249,20 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
           setStorageStatus('memory-only');
           setStorageError(error instanceof Error ? error.message : 'Could not update the conversation in the encrypted vault.');
         });
+      }
+    },
+    resetEncryptedVault: async () => {
+      try {
+        await destroyLocalVault();
+        await openSecureChatDatabase();
+        setThreads([]);
+        setMessages([]);
+        setStorageStatus('encrypted');
+        setStorageError(null);
+      } catch (error) {
+        setStorageStatus('memory-only');
+        setStorageError(error instanceof Error ? error.message : 'Could not reset the encrypted vault.');
+        throw error;
       }
     },
   }), [threads, messages, storageStatus, storageError]);

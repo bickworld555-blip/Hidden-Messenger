@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 
 const DATABASE_NAME = 'quietlink-vault.db';
 const KEY_ALIAS = 'quietlink.sqlcipher.key.v1';
+const DEMO_SUPPRESSED_KEY = 'quietlink.demo-suppressed.v1';
 
 type SQLiteDatabase = import('expo-sqlite').SQLiteDatabase;
 
@@ -19,6 +20,11 @@ export type LocalConversation = {
   is_pinned: number;
   is_group: number;
 };
+
+export async function shouldSeedDemoContent() {
+  const SecureStore = await import('expo-secure-store');
+  return (await SecureStore.getItemAsync(DEMO_SUPPRESSED_KEY)) !== 'true';
+}
 
 function toHex(bytes: Uint8Array) {
   return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
@@ -246,4 +252,5 @@ export async function destroyLocalVault() {
   }
   await SQLite.deleteDatabaseAsync(DATABASE_NAME);
   await SecureStore.deleteItemAsync(KEY_ALIAS);
+  await SecureStore.setItemAsync(DEMO_SUPPRESSED_KEY, 'true');
 }
