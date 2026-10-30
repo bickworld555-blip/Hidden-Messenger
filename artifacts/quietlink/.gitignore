@@ -39,3 +39,9 @@ yarn-error.*
 .vercel
 
 .env
+
+# Keep custom native-module source code tracked without tracking generated projects.
+!modules/secure-voice-output/ios/
+!modules/secure-voice-output/ios/**
+!modules/secure-voice-output/android/
+!modules/secure-voice-output/android/**

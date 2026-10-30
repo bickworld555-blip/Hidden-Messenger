@@ -1,0 +1,23 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.securevoiceoutput'
+version = '1.0.0'
+
+android {
+  namespace 'expo.modules.securevoiceoutput'
+  defaultConfig {
+    versionCode 1
+    versionName '1.0.0'
+  }
+
+  compileOptions {
+    targetCompatibility JavaVersion.VERSION_1_8
+  }
+}
+
+repositories {
+  mavenCentral()
+}

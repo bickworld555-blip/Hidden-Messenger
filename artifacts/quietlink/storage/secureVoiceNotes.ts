@@ -33,6 +33,12 @@ type SecureVoiceOutputModule = {
   writePcmChunk(chunk: Uint8Array): Promise<void>;
   setPlaybackSpeed(speed: number): Promise<void>;
   stopPlayback(): Promise<void>;
+  startInterruptionMonitoring(): Promise<void>;
+  stopInterruptionMonitoring(): Promise<void>;
+  addListener(
+    eventName: 'audioInterruption',
+    listener: (event: { reason: string }) => void,
+  ): { remove: () => void };
 };
 
 type ExpoAudioModule = {
@@ -78,6 +84,33 @@ function getNativeOutput() {
   }
 }
 
+export function addLocalVoiceInterruptionListener(
+  listener: (event: { reason: string }) => void,
+) {
+  const output = getNativeOutput();
+  if (!output || typeof output.addListener !== 'function') return null;
+  try {
+    return output.addListener('audioInterruption', listener);
+  } catch {
+    return null;
+  }
+}
+
+export async function startLocalVoiceInterruptionMonitoring() {
+  const output = getNativeOutput();
+  if (!output || typeof output.startInterruptionMonitoring !== 'function') {
+    throw new Error('Native audio interruption monitoring is unavailable.');
+  }
+  await output.startInterruptionMonitoring();
+}
+
+export async function stopLocalVoiceInterruptionMonitoring() {
+  const output = getNativeOutput();
+  if (output && typeof output.stopInterruptionMonitoring === 'function') {
+    await output.stopInterruptionMonitoring();
+  }
+}
+
 export function isSecureVoiceNotePathAvailable() {
   if (Platform.OS !== 'ios' && Platform.OS !== 'android') return false;
   try {
@@ -89,7 +122,10 @@ export function isSecureVoiceNotePathAvailable() {
       typeof output.startPlayback === 'function' &&
       typeof output.writePcmChunk === 'function' &&
       typeof output.setPlaybackSpeed === 'function' &&
-      typeof output.stopPlayback === 'function'
+      typeof output.stopPlayback === 'function' &&
+      typeof output.startInterruptionMonitoring === 'function' &&
+      typeof output.stopInterruptionMonitoring === 'function' &&
+      typeof output.addListener === 'function'
     );
   } catch {
     return false;

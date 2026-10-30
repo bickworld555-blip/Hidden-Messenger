@@ -1,19 +1,26 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useAudioStream, type AudioStreamBuffer } from 'expo-audio';
-import { Animated, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { AppState, Animated, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
 import {
   beginLocalVoiceNote,
+  addLocalVoiceInterruptionListener,
   deleteLocalVoiceNoteAndCiphertext,
   isSecureVoiceNotePathAvailable,
   listLocalVoiceNoteSummaries,
   playLocalVoiceNote,
   setLocalVoicePlaybackSpeed,
+  startLocalVoiceInterruptionMonitoring,
+  stopLocalVoiceInterruptionMonitoring,
   stopLocalVoicePlayback,
   type LocalVoiceNoteWriter,
 } from '@/storage/secureVoiceNotes';
 import type { LocalVoiceNoteSummary } from '@/storage/secureChatDb';
+import {
+  discardInterruptedVoiceCapture,
+  subscribeToVoiceNoteInterruption,
+} from '@/storage/voiceNoteInterruption';
 
 const SAMPLE_RATE = 16_000;
 const CHANNELS = 1;
@@ -143,8 +150,10 @@ function SecureVoiceNoteControls({
   const captureFailureRef = useRef<unknown>(null);
   const stopCaptureRef = useRef<() => void>(() => {});
   const playbackAbortRef = useRef<AbortController | null>(null);
+  const startInProgressRef = useRef(false);
+  const interruptionEpochRef = useRef(0);
   const mountedRef = useRef(true);
-  const [captureState, setCaptureState] = useState<'idle' | 'recording' | 'saving'>('idle');
+  const [captureState, setCaptureState] = useState<'idle' | 'starting' | 'recording' | 'saving' | 'interrupted'>('idle');
   const [durationSeconds, setDurationSeconds] = useState(0);
   const [notes, setNotes] = useState<LocalVoiceNoteSummary[]>([]);
   const [playingId, setPlayingId] = useState<string | null>(null);
@@ -221,6 +230,7 @@ function SecureVoiceNoteControls({
       writerRef.current = null;
       if (writer) void writer.abort();
       void stopLocalVoicePlayback().catch(() => undefined);
+      void stopLocalVoiceInterruptionMonitoring().catch(() => undefined);
     };
   }, [refreshNotes, stream]);
 
@@ -246,15 +256,20 @@ function SecureVoiceNoteControls({
         await refreshNotes();
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Recording was discarded.';
-      if (mountedRef.current) setNotice(message);
+      captureFailureRef.current ??= error;
+      if (mountedRef.current) {
+        setNotice('Recording was interrupted or could not be saved. The incomplete note was discarded. Tap the microphone to try again.');
+      }
       const writer = writerRef.current;
       writerRef.current = null;
-      if (writer) await writer.abort();
+      if (writer) {
+        try { await writer.abort(); } catch { /* the writer already discarded its key/file best-effort */ }
+      }
     } finally {
       savingRef.current = false;
+      void stopLocalVoiceInterruptionMonitoring().catch(() => undefined);
       if (mountedRef.current) {
-        setCaptureState('idle');
+        setCaptureState(captureFailureRef.current ? 'interrupted' : 'idle');
         setDurationSeconds(0);
       }
     }
@@ -264,14 +279,84 @@ function SecureVoiceNoteControls({
     stopCaptureRef.current = () => { void stopRecording(); };
   }, [stopRecording]);
 
+  const discardInterruptedCapture = useCallback(async () => {
+    const writer = writerRef.current;
+    if (!writer || savingRef.current) return;
+    savingRef.current = true;
+    captureActiveRef.current = false;
+    captureFailureRef.current = new Error('Audio capture was interrupted.');
+    if (mountedRef.current) setCaptureState('saving');
+    try {
+      await discardInterruptedVoiceCapture({
+        writer,
+        stopStream: () => stopAudioStreamSafely(streamRef.current),
+        drainPendingWrites: () => pipelineRef.current,
+        stopInterruptionMonitoring: stopLocalVoiceInterruptionMonitoring,
+      });
+    } catch {
+      try { await writer.abort(); } catch { /* cleanup is best-effort after capture interruption */ }
+    } finally {
+      writerRef.current = null;
+      pendingBytesRef.current = 0;
+      savingRef.current = false;
+      void stopLocalVoiceInterruptionMonitoring().catch(() => undefined);
+      if (mountedRef.current) {
+        setCaptureState('interrupted');
+        setDurationSeconds(0);
+        setNotice('Recording interrupted. The incomplete encrypted note was discarded. Tap the microphone to try again.');
+      }
+    }
+  }, []);
+
+  const handleSystemInterruption = useCallback(() => {
+    interruptionEpochRef.current += 1;
+    if (writerRef.current) void discardInterruptedCapture();
+    const controller = playbackAbortRef.current;
+    if (!controller) return;
+    playbackAbortRef.current = null;
+    controller.abort();
+    void stopLocalVoicePlayback().catch(() => undefined);
+    if (mountedRef.current) {
+      setPlayingId(null);
+      setNotice('Playback interrupted. Audio buffers were cleared. Tap Play to try again.');
+    }
+  }, [discardInterruptedCapture]);
+
+  useEffect(() => {
+    const appStateSubscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState !== 'active') handleSystemInterruption();
+    });
+    const audioSubscription = addLocalVoiceInterruptionListener(() => handleSystemInterruption());
+    const callSubscription = subscribeToVoiceNoteInterruption(handleSystemInterruption);
+    return () => {
+      appStateSubscription.remove();
+      audioSubscription?.remove();
+      callSubscription();
+    };
+  }, [handleSystemInterruption]);
+
   const startRecording = async () => {
-    if (captureState !== 'idle' || writerRef.current || savingRef.current) return;
+    if (
+      (captureState !== 'idle' && captureState !== 'interrupted') ||
+      writerRef.current ||
+      savingRef.current ||
+      startInProgressRef.current
+    ) return;
+    startInProgressRef.current = true;
+    const startEpoch = interruptionEpochRef.current;
+    setCaptureState('starting');
     setNotice('');
-    const permissionGranted = await onCheckMicrophone();
-    if (!permissionGranted) return;
 
     let writer: LocalVoiceNoteWriter | null = null;
     try {
+      const permissionGranted = await onCheckMicrophone();
+      if (!permissionGranted) {
+        setCaptureState(captureFailureRef.current ? 'interrupted' : 'idle');
+        return;
+      }
+      if (startEpoch !== interruptionEpochRef.current) {
+        throw new Error('Audio capture was interrupted before it started.');
+      }
       writer = await beginLocalVoiceNote(conversationId);
       writerRef.current = writer;
       captureFailureRef.current = null;
@@ -279,7 +364,14 @@ function SecureVoiceNoteControls({
       pipelineRef.current = Promise.resolve();
       captureActiveRef.current = false;
       setDurationSeconds(0);
+      await startLocalVoiceInterruptionMonitoring();
+      if (captureFailureRef.current || startEpoch !== interruptionEpochRef.current) {
+        throw captureFailureRef.current ?? new Error('Audio capture was interrupted before it started.');
+      }
       await stream.start();
+      if (startEpoch !== interruptionEpochRef.current) {
+        throw new Error('Audio capture was interrupted before it started.');
+      }
       if (stream.sampleRate !== SAMPLE_RATE || stream.channels !== CHANNELS) {
         throw new Error('This device cannot provide the required mono 16 kHz PCM format.');
       }
@@ -290,10 +382,15 @@ function SecureVoiceNoteControls({
     } catch (error) {
       captureActiveRef.current = false;
       try { await stream.stop(); } catch { /* stream did not start */ }
-      if (writer) await writer.abort();
+      if (writer) {
+        try { await writer.abort(); } catch { /* never keep an incomplete note active for retry */ }
+      }
       writerRef.current = null;
-      setCaptureState('idle');
-      setNotice(error instanceof Error ? error.message : 'Could not start encrypted recording.');
+      void stopLocalVoiceInterruptionMonitoring().catch(() => undefined);
+      setCaptureState('interrupted');
+      setNotice('Could not start recording. No partial note was kept. Tap the microphone to try again.');
+    } finally {
+      startInProgressRef.current = false;
     }
   };
 
@@ -378,16 +475,28 @@ function SecureVoiceNoteControls({
       <View style={styles.controls}>
         <Pressable
           onPress={() => captureState === 'recording' ? void stopRecording() : void startRecording()}
-          disabled={captureState === 'saving' || !!playingId}
+          disabled={captureState === 'saving' || captureState === 'starting' || !!playingId}
           style={[
             styles.recordButton,
             { backgroundColor: captureState === 'recording' ? colors.destructive : colors.primary },
-            (captureState === 'saving' || !!playingId) && { opacity: 0.55 },
+            (captureState === 'saving' || captureState === 'starting' || !!playingId) && { opacity: 0.55 },
           ]}
           accessibilityRole="button"
-          accessibilityLabel={captureState === 'recording' ? 'Stop and save encrypted voice note' : 'Record encrypted voice note'}
+          accessibilityLabel={
+            captureState === 'recording'
+              ? 'Stop and save encrypted voice note'
+              : captureState === 'starting'
+                ? 'Starting encrypted voice note recording'
+              : captureState === 'interrupted'
+                ? 'Retry encrypted voice note recording'
+                : 'Record encrypted voice note'
+          }
         >
-          <Feather name={captureState === 'recording' ? 'square' : 'mic'} size={14} color={colors.primaryForeground} />
+          <Feather
+            name={captureState === 'recording' ? 'square' : captureState === 'interrupted' ? 'refresh-cw' : 'mic'}
+            size={14}
+            color={colors.primaryForeground}
+          />
         </Pressable>
         <View style={styles.speedRow}>
           {playbackSpeeds.map((speed) => (
@@ -407,6 +516,7 @@ function SecureVoiceNoteControls({
             </Pressable>
           ))}
         </View>
+        {captureState === 'starting' ? <Text style={[styles.locked, { color: colors.mutedForeground }]}>Starting</Text> : null}
         {captureState === 'saving' ? <Text style={[styles.locked, { color: colors.mutedForeground }]}>Saving</Text> : null}
       </View>
 

@@ -213,6 +213,38 @@ test('an interrupted frame read and a renderer failure both clear temporary buff
   key.fill(0);
 });
 
+test('playback cancellation clears authenticated buffers before any further rendering', async () => {
+  const key = randomBytes(32);
+  const clear = Uint8Array.from([1, 0, 2, 0, 3, 0]);
+  const disk = [];
+  await writeEncryptedVoiceFrame(clear, 0, makeEncryptor(key), async (frame) => {
+    disk.push(Uint8Array.from(frame));
+  });
+
+  const controller = new AbortController();
+  const reader = createReader(disk[0], 3);
+  let decryptedBuffer;
+  await assert.rejects(
+    readAuthenticatedVoiceFrames(
+      reader,
+      { chunkCount: 1, totalBytes: clear.length },
+      async (frame, index, plaintextLength) => {
+        decryptedBuffer = await makeDecryptor(key)(frame, index, plaintextLength);
+        controller.abort();
+        return decryptedBuffer;
+      },
+      () => assert.fail('cancelled playback must not render another chunk'),
+      controller.signal,
+    ),
+    /interrupted/i,
+  );
+
+  assert.equal(decryptedBuffer.every((byte) => byte === 0), true);
+  assert.equal(reader.readBuffers.every((buffer) => buffer.every((byte) => byte === 0)), true);
+  disk[0].fill(0);
+  key.fill(0);
+});
+
 test('voice frame length and metadata inconsistencies fail closed', async () => {
   const reader = createReader(Uint8Array.from([0, 1, 0, 1]));
   await assert.rejects(

@@ -23,6 +23,7 @@ import { useColors } from '@/hooks/useColors';
 import { parseCallInvite, type CallMode } from '@/security/secureCallVerification';
 import { requestDevicePermission } from '@/services/devicePermissions';
 import { createSecureCallSession } from '@/services/secureCallSession';
+import { notifyVoiceNoteInterruption } from '@/storage/voiceNoteInterruption';
 import type {
   SecureCallController,
   SecureCallRole,
@@ -66,6 +67,10 @@ export default function CallScreen() {
   const [pageError, setPageError] = useState('');
   const tonePlayer = useAudioPlayer(SOUND_ASSETS.ringback);
   const endTonePlayer = useAudioPlayer(SOUND_ASSETS.ended);
+
+  useEffect(() => {
+    notifyVoiceNoteInterruption();
+  }, []);
 
   const requestCallPermissions = async (forRole: SecureCallRole) => {
     if (permissionBusy) return false;
