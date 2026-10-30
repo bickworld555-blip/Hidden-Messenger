@@ -7,7 +7,7 @@ index 4ad9affeea4282013924ca0f8c5f81809b57bc02..2a868b7ca45bb7c4238e4605a7b4b7e4
 -export default requireNativeModule('ExpoTopicSubscriptionModule');
 +import { requireOptionalNativeModule } from 'expo';
 +export default requireOptionalNativeModule('ExpoTopicSubscriptionModule') ?? {};
- 
+
  //# sourceMappingURL=TopicSubscriptionModule.android.js.map
 diff --git a/build/topicSubscription.js b/build/topicSubscription.js
 index 0f1ac5cd38c8ac7b0236244a19606856ddf11a38..4c76e390c7e6553637e3b171dad623f1fcd5ae17 100644
@@ -38,9 +38,9 @@ index da3fae49de183b86740777016456f29b1ee0ac70..6fd937cd5e95b46e20121b1d28cb490c
 @@ -1,5 +1,7 @@
 -import { requireNativeModule } from 'expo';
 +import { requireOptionalNativeModule } from 'expo';
- 
+
  import type { TopicSubscriptionModule } from './TopicSubscriptionModule.types';
- 
+
 -export default requireNativeModule<TopicSubscriptionModule>('ExpoTopicSubscriptionModule');
 +export default (
 +  requireOptionalNativeModule<TopicSubscriptionModule>('ExpoTopicSubscriptionModule') ?? {}

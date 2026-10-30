@@ -157,7 +157,7 @@ overrides:
 
 patchedDependencies:
   expo-notifications@58.1.4:
-    hash: f5d6617cee183f39a61462e73042233e7b8ce2d7ec0fb67e21cae6cbc536e70d
+    hash: 9d21edc4bbf1636f4519cb1cf7c2567050e534393f2b783883aa14e05d457727
     path: patches/expo-notifications@58.1.4.patch
 
 importers:
