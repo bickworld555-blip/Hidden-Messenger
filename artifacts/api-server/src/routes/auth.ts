@@ -318,7 +318,7 @@ router.get("/auth/session", (req, res) => {
   });
 });
 
-router.post("/auth/push-token", (req, res) => {
+router.post("/auth/push-token", async (req, res) => {
   const authenticated = getSessionFromRequest(req);
   if (!authenticated) {
     sendError(res, 401, "UNAUTHENTICATED", "Sign in again to continue.");
@@ -335,15 +335,19 @@ router.post("/auth/push-token", (req, res) => {
     return;
   }
   const accountId = derivePushAccountId(authenticated.session.phone, sessionSecret);
-  const registered = registerExpoPushToken(accountId, token, authenticated.session.expiresAt);
-  if (!registered) {
-    sendError(res, 429, "PUSH_DEVICE_LIMIT", "This account has reached its registered device limit.");
-    return;
+  try {
+    const registered = await registerExpoPushToken(accountId, token, authenticated.session.expiresAt);
+    if (!registered) {
+      sendError(res, 429, "PUSH_DEVICE_LIMIT", "This account has reached its registered device limit.");
+      return;
+    }
+    res.status(204).end();
+  } catch {
+    sendError(res, 503, "PUSH_REGISTRY_UNAVAILABLE", "Remote alert registration is temporarily unavailable.");
   }
-  res.status(204).end();
 });
 
-router.post("/auth/push-token/revoke", (req, res) => {
+router.post("/auth/push-token/revoke", async (req, res) => {
   const authenticated = getSessionFromRequest(req);
   if (!authenticated) {
     sendError(res, 401, "UNAUTHENTICATED", "Sign in again to continue.");
@@ -360,8 +364,12 @@ router.post("/auth/push-token/revoke", (req, res) => {
     return;
   }
   const accountId = derivePushAccountId(authenticated.session.phone, sessionSecret);
-  revokeExpoPushToken(accountId, token);
-  res.status(204).end();
+  try {
+    await revokeExpoPushToken(accountId, token);
+    res.status(204).end();
+  } catch {
+    sendError(res, 503, "PUSH_REGISTRY_UNAVAILABLE", "Remote alert revocation is temporarily unavailable.");
+  }
 });
 
 router.post("/auth/push-test", async (req, res) => {

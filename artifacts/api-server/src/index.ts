@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { attachSignalingGateway } from "./lib/signaling";
+import { initializePushTokenPersistence } from "./lib/pushNotifications";
 
 const rawPort = process.env["PORT"];
 
@@ -19,6 +20,13 @@ if (Number.isNaN(port) || port <= 0) {
 
 const server = createServer(app);
 attachSignalingGateway(server);
+
+void initializePushTokenPersistence().catch(() => {
+  logger.warn(
+    { subsystem: "push-token-registry" },
+    "Could not prune expired push registrations at startup",
+  );
+});
 
 server.on("error", (err) => {
   logger.error({ err }, "Error listening on port");

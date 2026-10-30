@@ -1,4 +1,11 @@
-import { createHmac } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHmac,
+  hkdfSync,
+  randomBytes,
+} from "node:crypto";
+import type { PushTokenPersistence } from "./pushTokenPersistence";
 
 const PUSH_ENDPOINT = "https://exp.host/--/api/v2/push/send";
 const MAX_TOKENS_PER_ACCOUNT = 8;
@@ -7,7 +14,6 @@ const MAX_ACCOUNTS = 10_000;
 const RECEIPT_CHECK_DELAY_MS = 15 * 60 * 1000;
 
 type PushKind = "call" | "message" | "test";
-type PushRecord = { expiresAt: number };
 type PushMessage = {
   to: string;
   title: "Hidden Messenger";
@@ -18,10 +24,14 @@ type PushMessage = {
   channelId: "quietlink-alerts";
   ttl: number;
 };
-type ReceiptRef = { accountId: string; token: string; ticketId: string };
+type ReceiptRef = { accountId: string; tokenFingerprint: string; ticketId: string };
+type PushTokenKeys = { encryption: Buffer; fingerprint: Buffer };
 
-const tokensByAccount = new Map<string, Map<string, PushRecord>>();
 const testCooldowns = new Map<string, number>();
+const TOKEN_ENVELOPE_VERSION = "v1";
+const TOKEN_NONCE_BYTES = 12;
+const TOKEN_TAG_BYTES = 16;
+const TOKEN_KEY_SALT = Buffer.from("Hidden Messenger push token registry v1");
 
 const accountIdPattern = /^[A-Za-z0-9_-]{43}$/;
 const pushTokenPattern = /^(?:Expo|Exponent)PushToken\[[A-Za-z0-9_-]{20,240}\]$/;
@@ -42,132 +52,329 @@ export function isOpaquePushRouteId(value: unknown): value is string {
   return typeof value === "string" && routeIdPattern.test(value);
 }
 
-function pruneExpiredTokens(now: number) {
-  for (const [accountId, accountTokens] of tokensByAccount) {
-    for (const [token, record] of accountTokens) {
-      if (record.expiresAt <= now) accountTokens.delete(token);
-    }
-    if (!accountTokens.size) tokensByAccount.delete(accountId);
+function derivePushTokenKeys(): PushTokenKeys {
+  const masterSecret = process.env["SESSION_SECRET"];
+  if (!masterSecret) throw new Error("Push token encryption is not configured.");
+  return {
+    encryption: Buffer.from(
+      hkdfSync("sha256", masterSecret, TOKEN_KEY_SALT, "aes-256-gcm", 32),
+    ),
+    fingerprint: Buffer.from(
+      hkdfSync("sha256", masterSecret, TOKEN_KEY_SALT, "token-fingerprint", 32),
+    ),
+  };
+}
+
+function clearPushTokenKeys(keys: PushTokenKeys) {
+  keys.encryption.fill(0);
+  keys.fingerprint.fill(0);
+}
+
+function fingerprintPushToken(token: string, key: Buffer) {
+  return createHmac("sha256", key).update(token).digest("hex");
+}
+
+function pushTokenAad(accountId: string, tokenFingerprint: string) {
+  return Buffer.from(JSON.stringify([
+    "Hidden Messenger push-token registration v1",
+    accountId,
+    tokenFingerprint,
+  ]));
+}
+
+function encryptPushToken(
+  token: string,
+  accountId: string,
+  tokenFingerprint: string,
+  key: Buffer,
+) {
+  const nonce = randomBytes(TOKEN_NONCE_BYTES);
+  const aad = pushTokenAad(accountId, tokenFingerprint);
+  try {
+    const cipher = createCipheriv("aes-256-gcm", key, nonce);
+    cipher.setAAD(aad);
+    const ciphertext = Buffer.concat([
+      cipher.update(token, "utf8"),
+      cipher.final(),
+    ]);
+    return [
+      TOKEN_ENVELOPE_VERSION,
+      nonce.toString("base64url"),
+      cipher.getAuthTag().toString("base64url"),
+      ciphertext.toString("base64url"),
+    ].join(".");
+  } finally {
+    aad.fill(0);
   }
+}
+
+function decryptPushToken(
+  encryptedToken: string,
+  accountId: string,
+  tokenFingerprint: string,
+  key: Buffer,
+) {
+  const [version, nonceValue, tagValue, ciphertextValue, ...extra] =
+    encryptedToken.split(".");
+  const base64UrlPattern = /^[A-Za-z0-9_-]+$/;
+  if (
+    version !== TOKEN_ENVELOPE_VERSION ||
+    extra.length > 0 ||
+    !nonceValue ||
+    !tagValue ||
+    !ciphertextValue ||
+    !base64UrlPattern.test(nonceValue) ||
+    !base64UrlPattern.test(tagValue) ||
+    !base64UrlPattern.test(ciphertextValue)
+  ) {
+    throw new Error("Stored push registration is invalid.");
+  }
+
+  const nonce = Buffer.from(nonceValue, "base64url");
+  const tag = Buffer.from(tagValue, "base64url");
+  const ciphertext = Buffer.from(ciphertextValue, "base64url");
+  if (
+    nonce.length !== TOKEN_NONCE_BYTES ||
+    tag.length !== TOKEN_TAG_BYTES ||
+    ciphertext.length > 256
+  ) {
+    throw new Error("Stored push registration is invalid.");
+  }
+
+  const aad = pushTokenAad(accountId, tokenFingerprint);
+  let plaintext: Buffer | null = null;
+  try {
+    const decipher = createDecipheriv("aes-256-gcm", key, nonce);
+    decipher.setAAD(aad);
+    decipher.setAuthTag(tag);
+    plaintext = Buffer.concat([
+      decipher.update(ciphertext),
+      decipher.final(),
+    ]);
+    const token = plaintext.toString("utf8");
+    if (!isExpoPushToken(token)) {
+      throw new Error("Stored push registration is invalid.");
+    }
+    return token;
+  } finally {
+    plaintext?.fill(0);
+    aad.fill(0);
+    nonce.fill(0);
+    tag.fill(0);
+    ciphertext.fill(0);
+  }
+}
+
+function pruneExpiredTestCooldowns(now: number) {
   for (const [accountId, retryAt] of testCooldowns) {
     if (retryAt <= now) testCooldowns.delete(accountId);
   }
-  if (tokensByAccount.size > MAX_ACCOUNTS) {
-    const removeCount = tokensByAccount.size - MAX_ACCOUNTS;
-    let removed = 0;
-    for (const accountId of tokensByAccount.keys()) {
-      tokensByAccount.delete(accountId);
-      if (++removed >= removeCount) break;
-    }
-  }
-}
-
-export function registerExpoPushToken(accountId: string, token: string, expiresAt: number) {
-  if (!accountIdPattern.test(accountId) || !isExpoPushToken(token)) return false;
-  const now = Date.now();
-  pruneExpiredTokens(now);
-  const accountTokens = tokensByAccount.get(accountId) ?? new Map<string, PushRecord>();
-  if (!accountTokens.has(token) && accountTokens.size >= MAX_TOKENS_PER_ACCOUNT) return false;
-  accountTokens.set(token, {
-    expiresAt: Math.min(expiresAt, now + PUSH_TOKEN_TTL_MS),
-  });
-  tokensByAccount.set(accountId, accountTokens);
-  return true;
-}
-
-export function revokeExpoPushToken(accountId: string, token: string) {
-  if (!accountIdPattern.test(accountId) || !isExpoPushToken(token)) return false;
-  const accountTokens = tokensByAccount.get(accountId);
-  if (!accountTokens) return true;
-  accountTokens.delete(token);
-  if (!accountTokens.size) tokensByAccount.delete(accountId);
-  return true;
 }
 
 export function allowPushTest(accountId: string) {
   if (!accountIdPattern.test(accountId)) return false;
   const now = Date.now();
-  pruneExpiredTokens(now);
+  pruneExpiredTestCooldowns(now);
   const retryAt = testCooldowns.get(accountId) ?? 0;
   if (retryAt > now) return false;
   testCooldowns.set(accountId, now + 30_000);
   return true;
 }
 
+export function createPushNotificationService(persistence: PushTokenPersistence) {
+  return {
+    async pruneExpiredRegistrations() {
+      await persistence.pruneExpired(Date.now());
+    },
+
+    async registerExpoPushToken(accountId: string, token: string, expiresAt: number) {
+      if (
+        !accountIdPattern.test(accountId) ||
+        !isExpoPushToken(token) ||
+        !Number.isFinite(expiresAt)
+      ) return false;
+      const now = Date.now();
+      const boundedExpiresAt = Math.min(expiresAt, now + PUSH_TOKEN_TTL_MS);
+      if (boundedExpiresAt <= now) return false;
+
+      const keys = derivePushTokenKeys();
+      try {
+        const tokenFingerprint = fingerprintPushToken(token, keys.fingerprint);
+        const encryptedToken = encryptPushToken(
+          token,
+          accountId,
+          tokenFingerprint,
+          keys.encryption,
+        );
+        await persistence.pruneExpired(now);
+        return await persistence.register({
+          accountId,
+          tokenFingerprint,
+          encryptedToken,
+          expiresAt: boundedExpiresAt,
+        }, now, {
+          maxTokensPerAccount: MAX_TOKENS_PER_ACCOUNT,
+          maxAccounts: MAX_ACCOUNTS,
+        });
+      } finally {
+        clearPushTokenKeys(keys);
+      }
+    },
+
+    async revokeExpoPushToken(accountId: string, token: string) {
+      if (!accountIdPattern.test(accountId) || !isExpoPushToken(token)) return false;
+      const keys = derivePushTokenKeys();
+      try {
+        const tokenFingerprint = fingerprintPushToken(token, keys.fingerprint);
+        await persistence.remove(accountId, tokenFingerprint);
+        return true;
+      } finally {
+        clearPushTokenKeys(keys);
+      }
+    },
+
+    async sendGenericPushNotification(
+      input: { accountId: string; type: PushKind; routeId: string },
+      fetcher: typeof fetch = fetch,
+    ) {
+      if (
+        !accountIdPattern.test(input.accountId) ||
+        !isOpaquePushRouteId(input.routeId) ||
+        !["call", "message", "test"].includes(input.type)
+      ) {
+        throw new Error("The notification route is invalid.");
+      }
+
+      const now = Date.now();
+      await persistence.pruneExpired(now);
+      const registrations = await persistence.listActive(input.accountId, now);
+      if (!registrations.length) return { acceptedCount: 0, tokenCount: 0 };
+
+      const keys = derivePushTokenKeys();
+      const tokens: Array<{ value: string; fingerprint: string }> = [];
+      try {
+        for (const registration of registrations) {
+          try {
+            tokens.push({
+              value: decryptPushToken(
+                registration.encryptedToken,
+                input.accountId,
+                registration.tokenFingerprint,
+                keys.encryption,
+              ),
+              fingerprint: registration.tokenFingerprint,
+            });
+          } catch {
+            await persistence.remove(input.accountId, registration.tokenFingerprint).catch(() => undefined);
+          }
+        }
+      } finally {
+        clearPushTokenKeys(keys);
+      }
+      if (!tokens.length) return { acceptedCount: 0, tokenCount: 0 };
+
+      const messages: PushMessage[] = tokens.map(({ value }) => ({
+        to: value,
+        title: "Hidden Messenger",
+        body: input.type === "call"
+          ? "Incoming call"
+          : input.type === "message"
+            ? "New message"
+            : "Notifications are enabled",
+        data: {
+          type: input.type,
+          routeId: input.routeId,
+          accountId: input.accountId,
+        },
+        sound: "default",
+        priority: "high",
+        channelId: "quietlink-alerts",
+        ttl: input.type === "message" ? 3_600 : 60,
+      }));
+
+      const headers: Record<string, string> = {
+        accept: "application/json",
+        "content-type": "application/json",
+      };
+      const accessToken = process.env["EXPO_ACCESS_TOKEN"];
+      if (accessToken) headers.authorization = `Bearer ${accessToken}`;
+
+      const response = await postToExpo(PUSH_ENDPOINT, messages, headers, fetcher);
+      const payload = await response.json().catch(() => null);
+      const tickets =
+        payload && typeof payload === "object" && "data" in payload && Array.isArray(payload.data)
+          ? payload.data as Array<Record<string, unknown>>
+          : null;
+      if (!tickets || tickets.length !== tokens.length) {
+        throw new Error("The push provider returned an invalid response.");
+      }
+
+      let acceptedCount = 0;
+      const receiptRefs: ReceiptRef[] = [];
+      for (const [index, ticket] of tickets.entries()) {
+        if (ticket.status === "ok") {
+          acceptedCount += 1;
+          if (typeof ticket.id === "string") {
+            receiptRefs.push({
+              accountId: input.accountId,
+              tokenFingerprint: tokens[index].fingerprint,
+              ticketId: ticket.id,
+            });
+          }
+          continue;
+        }
+        const details = ticket.details;
+        if (
+          details &&
+          typeof details === "object" &&
+          "error" in details &&
+          details.error === "DeviceNotRegistered"
+        ) {
+          await persistence.remove(input.accountId, tokens[index].fingerprint).catch(() => undefined);
+        }
+      }
+      if (receiptRefs.length) {
+        scheduleReceiptCheck(receiptRefs, persistence, headers, fetcher);
+      }
+      return { acceptedCount, tokenCount: tokens.length };
+    },
+  };
+}
+
+type PushNotificationService = ReturnType<typeof createPushNotificationService>;
+let persistentPushServicePromise: Promise<PushNotificationService> | null = null;
+
+async function getPersistentPushService() {
+  if (!persistentPushServicePromise) {
+    persistentPushServicePromise = import("./pushTokenPersistence")
+      .then(({ PostgresPushTokenPersistence }) =>
+        createPushNotificationService(new PostgresPushTokenPersistence()))
+      .catch((error: unknown) => {
+        persistentPushServicePromise = null;
+        throw error;
+      });
+  }
+  return persistentPushServicePromise;
+}
+
+export async function initializePushTokenPersistence() {
+  const service = await getPersistentPushService();
+  await service.pruneExpiredRegistrations();
+}
+
+export async function registerExpoPushToken(accountId: string, token: string, expiresAt: number) {
+  return (await getPersistentPushService()).registerExpoPushToken(accountId, token, expiresAt);
+}
+
+export async function revokeExpoPushToken(accountId: string, token: string) {
+  return (await getPersistentPushService()).revokeExpoPushToken(accountId, token);
+}
+
 export async function sendGenericPushNotification(
   input: { accountId: string; type: PushKind; routeId: string },
   fetcher: typeof fetch = fetch,
 ) {
-  if (
-    !accountIdPattern.test(input.accountId) ||
-    !isOpaquePushRouteId(input.routeId) ||
-    !["call", "message", "test"].includes(input.type)
-  ) {
-    throw new Error("The notification route is invalid.");
-  }
-  pruneExpiredTokens(Date.now());
-  const accountTokens = tokensByAccount.get(input.accountId);
-  if (!accountTokens?.size) return { acceptedCount: 0, tokenCount: 0 };
-
-  const tokens = [...accountTokens.keys()];
-  const messages: PushMessage[] = tokens.map((token) => ({
-    to: token,
-    title: "Hidden Messenger",
-    body: input.type === "call"
-      ? "Incoming call"
-      : input.type === "message"
-        ? "New message"
-        : "Notifications are enabled",
-    data: {
-      type: input.type,
-      routeId: input.routeId,
-      accountId: input.accountId,
-    },
-    sound: "default",
-    priority: "high",
-    channelId: "quietlink-alerts",
-    ttl: input.type === "message" ? 3_600 : 60,
-  }));
-
-  const headers: Record<string, string> = {
-    accept: "application/json",
-    "content-type": "application/json",
-  };
-  const accessToken = process.env["EXPO_ACCESS_TOKEN"];
-  if (accessToken) headers.authorization = `Bearer ${accessToken}`;
-
-  const response = await postToExpo(PUSH_ENDPOINT, messages, headers, fetcher);
-  const payload = await response.json().catch(() => null);
-  const tickets =
-    payload && typeof payload === "object" && "data" in payload && Array.isArray(payload.data)
-      ? payload.data as Array<Record<string, unknown>>
-      : null;
-  if (!tickets || tickets.length !== tokens.length) {
-    throw new Error("The push provider returned an invalid response.");
-  }
-
-  let acceptedCount = 0;
-  const receiptRefs: ReceiptRef[] = [];
-  for (const [index, ticket] of tickets.entries()) {
-    if (ticket.status === "ok") {
-      acceptedCount += 1;
-      if (typeof ticket.id === "string") {
-        receiptRefs.push({ accountId: input.accountId, token: tokens[index], ticketId: ticket.id });
-      }
-      continue;
-    }
-    const details = ticket.details;
-    if (
-      details &&
-      typeof details === "object" &&
-      "error" in details &&
-      details.error === "DeviceNotRegistered"
-    ) {
-      revokeExpoPushToken(input.accountId, tokens[index]);
-    }
-  }
-  if (receiptRefs.length) scheduleReceiptCheck(receiptRefs, headers, fetcher);
-  return { acceptedCount, tokenCount: tokens.length };
+  return (await getPersistentPushService()).sendGenericPushNotification(input, fetcher);
 }
 
 async function postToExpo(url: string, body: unknown, headers: Record<string, string>, fetcher: typeof fetch) {
@@ -195,7 +402,12 @@ async function postToExpo(url: string, body: unknown, headers: Record<string, st
   throw new Error("The push provider is temporarily unavailable.");
 }
 
-function scheduleReceiptCheck(receipts: ReceiptRef[], headers: Record<string, string>, fetcher: typeof fetch) {
+function scheduleReceiptCheck(
+  receipts: ReceiptRef[],
+  persistence: PushTokenPersistence,
+  headers: Record<string, string>,
+  fetcher: typeof fetch,
+) {
   const timer = setTimeout(() => {
     void (async () => {
       try {
@@ -219,7 +431,7 @@ function scheduleReceiptCheck(receipts: ReceiptRef[], headers: Record<string, st
             "error" in details &&
             details.error === "DeviceNotRegistered"
           ) {
-            revokeExpoPushToken(receipt.accountId, receipt.token);
+            await persistence.remove(receipt.accountId, receipt.tokenFingerprint).catch(() => undefined);
           }
         }
       } catch {
