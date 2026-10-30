@@ -7,6 +7,8 @@
  */
 
 export interface AuthSession {
+  /** @pattern ^[A-Za-z0-9_-]{43}$ */
+  accountId: string;
   phone: string;
   expiresAt: Date;
 }

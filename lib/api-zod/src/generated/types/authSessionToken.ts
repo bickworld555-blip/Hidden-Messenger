@@ -8,6 +8,8 @@
 
 export interface AuthSessionToken {
   accessToken: string;
+  /** @pattern ^[A-Za-z0-9_-]{43}$ */
+  accountId: string;
   phone: string;
   expiresAt: Date;
 }

@@ -12,6 +12,8 @@ tags:
     description: Health operations
   - name: auth
     description: Phone OTP authentication
+  - name: notifications
+    description: Generic, privacy-preserving push notifications
 paths:
   /healthz:
     get:
@@ -112,6 +114,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthError"
+        "429":
+          description: Account push-device limit reached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
   /auth/logout:
     post:
       operationId: logoutAuthSession
@@ -124,6 +132,100 @@ paths:
           description: Session revoked
         "401":
           description: Session is missing or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+  /auth/push-token:
+    post:
+      operationId: registerPushToken
+      tags: [notifications]
+      summary: Register an Expo push token for the authenticated device
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushTokenInput"
+      responses:
+        "204":
+          description: Push token registered
+        "400":
+          description: Invalid Expo push token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+        "401":
+          description: Session is missing or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+  /auth/push-token/revoke:
+    post:
+      operationId: revokePushToken
+      tags: [notifications]
+      summary: Revoke a registered Expo push token for the authenticated device
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushTokenInput"
+      responses:
+        "204":
+          description: Push token revoked
+        "400":
+          description: Invalid Expo push token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+        "401":
+          description: Session is missing or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+  /auth/push-test:
+    post:
+      operationId: sendPushTest
+      tags: [notifications]
+      summary: Send a generic test notification to the authenticated account
+      security:
+        - bearerAuth: []
+      responses:
+        "202":
+          description: Test notification accepted by the push provider
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushTestAccepted"
+        "401":
+          description: Session is missing or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+        "409":
+          description: No active push token is registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+        "429":
+          description: Test notification rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+        "503":
+          description: Push provider is unavailable
           content:
             application/json:
               schema:
@@ -170,21 +272,44 @@ components:
       properties:
         accessToken:
           type: string
+        accountId:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{43}$"
         phone:
           type: string
         expiresAt:
           type: string
           format: date-time
-      required: [accessToken, phone, expiresAt]
+      required: [accessToken, accountId, phone, expiresAt]
     AuthSession:
       type: object
       properties:
+        accountId:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{43}$"
         phone:
           type: string
         expiresAt:
           type: string
           format: date-time
-      required: [phone, expiresAt]
+      required: [accountId, phone, expiresAt]
+    PushTokenInput:
+      type: object
+      additionalProperties: false
+      properties:
+        token:
+          type: string
+          minLength: 30
+          maxLength: 256
+          pattern: "^(Expo|Exponent)PushToken\\[[A-Za-z0-9_-]{20,240}\\]$"
+      required: [token]
+    PushTestAccepted:
+      type: object
+      properties:
+        acceptedCount:
+          type: integer
+          minimum: 0
+      required: [acceptedCount]
     AuthError:
       type: object
       properties:

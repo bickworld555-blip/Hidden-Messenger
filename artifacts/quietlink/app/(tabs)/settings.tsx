@@ -10,7 +10,12 @@ import { useMessages } from '@/context/MessageContext';
 import { useAuth } from '@/context/AuthContext';
 import { useColors } from '@/hooks/useColors';
 import { getDevicePermission, requestDevicePermission, type DevicePermissionName, type DevicePermissionState } from '@/services/devicePermissions';
-import { scheduleLocalNotificationTest } from '@/services/quietLinkNotifications';
+import {
+  disableRemotePushNotifications,
+  enableRemotePushNotifications,
+  scheduleLocalNotificationTest,
+  sendRemotePushTest,
+} from '@/services/quietLinkNotifications';
 
 const ringtoneOptions: { value: RingtoneName; label: string }[] = [
   { value: 'soft', label: 'Soft' },
@@ -150,6 +155,29 @@ export default function SettingsScreen() {
       );
     }
   };
+  const handleRemotePush = async (enabled: boolean) => {
+    if (!enabled) {
+      const revoked = await disableRemotePushNotifications();
+      await updateSettings({ pushNotificationsEnabled: false });
+      if (!revoked) {
+        Alert.alert('Push token revoke pending', 'Remote alerts are off on this device. The server will retry token revocation when this device is online again.');
+      }
+      return;
+    }
+    const result = await enableRemotePushNotifications();
+    if (result.ok) {
+      await updateSettings({ pushNotificationsEnabled: true });
+      return;
+    }
+    const message = {
+      web: 'Remote push is available only in a rebuilt iOS or Android app.',
+      'module-unavailable': 'Push support is unavailable in this runtime. Use a rebuilt native app, not Expo Go.',
+      'permission-denied': 'Allow notifications in device settings to receive generic alerts.',
+      'project-id-missing': 'Configure the Expo EAS project ID for this app before registering push notifications.',
+      'registration-failed': 'The push token could not be registered. Check your connection and try again.',
+    }[result.reason];
+    Alert.alert('Remote alerts not enabled', message);
+  };
   const previewVibration = (pattern: VibrationPattern) => {
     if (Platform.OS === 'web' || pattern === 'off') return;
     Vibration.vibrate(pattern === 'short' ? 130 : [0, 100, 85, 130]);
@@ -164,6 +192,18 @@ export default function SettingsScreen() {
       if (!scheduled) Alert.alert('Notification permission required', 'Allow notifications to receive the local test alert.');
     } catch {
       Alert.alert('Local alert unavailable', 'The device could not schedule a local notification.');
+    }
+  };
+  const previewRemoteNotification = async () => {
+    if (!settings.pushNotificationsEnabled) {
+      Alert.alert('Enable remote alerts first', 'Turn on Remote push alerts above, then try this test again.');
+      return;
+    }
+    try {
+      await sendRemotePushTest();
+      Alert.alert('Test alert sent', 'A generic notification was accepted by the push service. Device delivery can take a short time.');
+    } catch {
+      Alert.alert('Remote alert unavailable', 'The push service could not accept the test alert. Confirm this device is registered and online.');
     }
   };
   return (
@@ -212,7 +252,7 @@ export default function SettingsScreen() {
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
           <SettingRow icon="lock" title="App lock" detail="Unavailable in this preview" onPress={() => explainNotReady('App lock')} trailing={<Text style={[styles.notAvailable, { color: colors.mutedForeground }]}>Not set</Text>} />
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
-          <SettingRow icon="eye" title="Message previews" detail="Always hidden; alert payloads stay generic" onPress={() => Alert.alert('Message privacy', 'Hidden Messenger local notifications never include chat text or media. Remote push delivery is not connected.')} trailing={<Feather name="lock" size={14} color={colors.mutedForeground} />} />
+          <SettingRow icon="eye" title="Message previews" detail="Always hidden; alert payloads stay generic" onPress={() => Alert.alert('Message privacy', 'Local and remote notifications use generic alert text only. Message text, media, contact names, and encryption keys are never placed in push payloads.')} trailing={<Feather name="lock" size={14} color={colors.mutedForeground} />} />
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
           <SettingRow
             icon="refresh-cw"
@@ -273,7 +313,14 @@ export default function SettingsScreen() {
             trailing={<Switch value={settings.localNotificationsEnabled} onValueChange={(value) => void handleLocalNotifications(value)} trackColor={{ true: colors.primary }} />}
           />
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
-          <SettingRow icon="send" title="Remote push delivery" detail="Not connected · no push sender is configured" onPress={() => Alert.alert('Remote alerts unavailable', 'Hidden Messenger has no push-delivery service or device-token registration endpoint yet. Local notifications can be tested below; incoming calls and messages cannot wake the app.')} />
+          <SettingRow
+            icon="send"
+            title="Remote push alerts"
+            detail={settings.pushNotificationsEnabled ? 'Enabled · generic copy only' : 'Off · no content in alert payloads'}
+            trailing={<Switch value={settings.pushNotificationsEnabled} onValueChange={(value) => void handleRemotePush(value)} trackColor={{ true: colors.primary }} />}
+          />
+          <View style={[styles.separator, { backgroundColor: colors.border }]} />
+          <SettingRow icon="send" title="Test remote alert" detail="Send a generic push to this account" onPress={() => void previewRemoteNotification()} />
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
           <SettingRow icon="bell" title="Test local alert" detail="Schedule a generic device notification" onPress={() => void previewLocalNotification()} />
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
@@ -283,7 +330,7 @@ export default function SettingsScreen() {
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
           <PermissionRow name="gallery" title="Photo library" detail="Requested only when you choose an attachment" icon="image" />
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
-          <PermissionRow name="notifications" title="Notifications" detail="Permission for local and future push alerts" icon="bell" />
+          <PermissionRow name="notifications" title="Notifications" detail="Permission for local and remote generic alerts" icon="bell" />
         </View>
 
         <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>APP</Text>
@@ -324,8 +371,8 @@ export default function SettingsScreen() {
           <Feather name="alert-triangle" size={16} color={colors.primary} />
           <Text style={[styles.disclosureText, { color: colors.accentForeground }]}>
             {storageStatus === 'encrypted'
-              ? 'Demo history is stored in the local SQLCipher vault. Imported media and voice notes are encrypted locally only. Text sending, media sharing, remote push, and device transfer are not connected. QR-verified WebRTC calls require a rebuilt native app and device testing. Flash storage and backups cannot be reliably shredded.'
-              : 'Demo history is held in app memory and is not transmitted. Local media import requires SQLCipher. Text sending, media sharing, remote push, and device transfer are not connected. WebRTC calls require a rebuilt native app and device testing.'}
+              ? 'Demo history is stored in the local SQLCipher vault. Imported media and voice notes are encrypted locally only. Text sending, media sharing, and device transfer are not connected. Generic push registration is available but needs Expo credentials and account event sources. QR-verified WebRTC calls require a rebuilt native app and device testing. Flash storage and backups cannot be reliably shredded.'
+              : 'Demo history is held in app memory and is not transmitted. Local media import requires SQLCipher. Text sending, media sharing, and device transfer are not connected. Generic push needs Expo credentials and account event sources. WebRTC calls require a rebuilt native app and device testing.'}
           </Text>
         </View>
         <Text style={[styles.version, { color: colors.mutedForeground }]}>Hidden Messenger · Private by design, transparent by default</Text>

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -21,42 +21,87 @@ import { AppSettingsProvider } from '@/context/AppSettingsContext';
 import {
   configureLocalNotifications,
   getOptionalNotificationsModule,
+  syncRemotePushRegistration,
 } from '@/services/quietLinkNotifications';
 import { useColors } from '@/hooks/useColors';
+import { useAppSettings } from '@/context/AppSettingsContext';
+
+export const unstable_settings = {
+  anchor: 'login',
+};
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
+type PushRoute = {
+  type: 'call' | 'message' | 'test';
+  routeId: string;
+  accountId: string;
+};
+let pendingPushRoute: PushRoute | null = null;
+
+function parsePushRoute(data: Record<string, unknown>): PushRoute | null {
+  const type = data.type;
+  const accountId = data.accountId;
+  const routeId = data.routeId;
+  const opaqueId = (value: unknown): value is string =>
+    typeof value === 'string' &&
+    (/^[A-Fa-f0-9]{32}$/.test(value) || /^[a-f0-9-]{36}$/.test(value) || /^[A-Za-z0-9_-]{22,128}$/.test(value));
+  if (
+    (type !== 'call' && type !== 'message' && type !== 'test') ||
+    typeof accountId !== 'string' ||
+    !/^[A-Za-z0-9_-]{43}$/.test(accountId) ||
+    !opaqueId(routeId)
+  ) return null;
+  return { type, routeId, accountId };
+}
+
 function RootLayoutNav({ signedIn }: { signedIn: boolean }) {
   const router = useRouter();
+  const { session } = useAuth();
+  const { settings, ready: settingsReady } = useAppSettings();
+  const authRef = useRef({ signedIn, accountId: session?.accountId ?? null });
+  authRef.current = { signedIn, accountId: session?.accountId ?? null };
+
+  const routePush = (route: PushRoute) => {
+    if (!authRef.current.signedIn || !authRef.current.accountId) {
+      pendingPushRoute = route;
+      return;
+    }
+    if (route.accountId !== authRef.current.accountId) return;
+    pendingPushRoute = null;
+    if (route.type === 'call') {
+      router.replace('/(tabs)/calls');
+    } else if (route.type === 'message') {
+      router.replace('/(tabs)');
+    } else {
+      router.replace('/(tabs)/settings');
+    }
+  };
+
   useEffect(() => {
     let disposed = false;
     let responseListener: { remove: () => void } | null = null;
 
     void (async () => {
       const Notifications = await getOptionalNotificationsModule();
-      if (disposed || !Notifications?.addNotificationResponseReceivedListener) return;
+      if (disposed || !Notifications) return;
       await configureLocalNotifications();
       if (disposed) return;
       try {
-        responseListener = Notifications.addNotificationResponseReceivedListener((response) => {
+        const handleResponse = (response: import('expo-notifications').NotificationResponse) => {
           const data = response.notification.request.content.data as Record<string, unknown>;
-          if (data.type === 'call' && typeof data.callId === 'string') {
-            router.push({
-              pathname: '/call/[id]',
-              params: {
-                id: data.callId,
-                name: typeof data.name === 'string' ? data.name : 'Hidden Messenger contact',
-                mode: data.mode === 'video' ? 'video' : 'audio',
-                stage: 'incoming',
-              },
-            });
-          } else if (data.type === 'message' && typeof data.conversationId === 'string') {
-            router.push({ pathname: '/chat/[id]', params: { id: data.conversationId } });
-          }
-        });
+          const route = parsePushRoute(data);
+          if (route) routePush(route);
+          void Notifications.clearLastNotificationResponseAsync?.().catch(() => undefined);
+        };
+        if (Notifications.addNotificationResponseReceivedListener) {
+          responseListener = Notifications.addNotificationResponseReceivedListener(handleResponse);
+        }
+        const lastResponse = await Notifications.getLastNotificationResponseAsync?.();
+        if (!disposed && lastResponse) handleResponse(lastResponse);
       } catch {
         // Native notification listeners are optional in Expo Go and previews.
       }
@@ -67,6 +112,21 @@ function RootLayoutNav({ signedIn }: { signedIn: boolean }) {
       responseListener?.remove();
     };
   }, [router]);
+
+  useEffect(() => {
+    const route = pendingPushRoute;
+    if (!route || !signedIn || !session?.accountId) return;
+    if (route.accountId !== session.accountId) {
+      pendingPushRoute = null;
+      return;
+    }
+    routePush(route);
+  }, [signedIn, session?.accountId]);
+
+  useEffect(() => {
+    if (!settingsReady || !signedIn || !session?.accountId) return;
+    void syncRemotePushRegistration(settings.pushNotificationsEnabled);
+  }, [settingsReady, settings.pushNotificationsEnabled, session?.accountId, signedIn]);
 
   return (
     <Stack screenOptions={{ headerBackTitle: 'Back' }}>

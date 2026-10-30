@@ -8,6 +8,7 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "test:signaling": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test tests/signaling.lifecycle.test.mjs",
+    "test:notifications": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test tests/pushNotifications.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

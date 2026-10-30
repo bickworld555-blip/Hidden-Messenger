@@ -50,8 +50,12 @@ export const VerifyOtpBody = zod.object({
   "code": zod.string().regex(verifyOtpBodyCodeRegExp)
 })
 
+export const verifyOtpResponseAccountIdRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+
+
 export const VerifyOtpResponse = zod.object({
   "accessToken": zod.string(),
+  "accountId": zod.string().regex(verifyOtpResponseAccountIdRegExp),
   "phone": zod.string(),
   "expiresAt": zod.coerce.date()
 })
@@ -60,7 +64,11 @@ export const VerifyOtpResponse = zod.object({
 /**
  * @summary Get the authenticated phone session
  */
+export const getAuthSessionResponseAccountIdRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+
+
 export const GetAuthSessionResponse = zod.object({
+  "accountId": zod.string().regex(getAuthSessionResponseAccountIdRegExp),
   "phone": zod.string(),
   "expiresAt": zod.coerce.date()
 })
@@ -70,5 +78,51 @@ export const GetAuthSessionResponse = zod.object({
  * @summary Revoke the current session
  */
 export const LogoutAuthSessionResponse = zod.void()
+
+
+/**
+ * @summary Register an Expo push token for the authenticated device
+ */
+export const registerPushTokenBodyTokenMin = 30;
+export const registerPushTokenBodyTokenMax = 256;
+
+
+export const registerPushTokenBodyTokenRegExp = new RegExp('^(Expo|Exponent)PushToken\\[[A-Za-z0-9_-]{20,240}\\]$');
+
+
+export const RegisterPushTokenBody = zod.object({
+  "token": zod.string().min(registerPushTokenBodyTokenMin).max(registerPushTokenBodyTokenMax).regex(registerPushTokenBodyTokenRegExp)
+})
+
+export const RegisterPushTokenResponse = zod.void()
+
+
+/**
+ * @summary Revoke a registered Expo push token for the authenticated device
+ */
+export const revokePushTokenBodyTokenMin = 30;
+export const revokePushTokenBodyTokenMax = 256;
+
+
+export const revokePushTokenBodyTokenRegExp = new RegExp('^(Expo|Exponent)PushToken\\[[A-Za-z0-9_-]{20,240}\\]$');
+
+
+export const RevokePushTokenBody = zod.object({
+  "token": zod.string().min(revokePushTokenBodyTokenMin).max(revokePushTokenBodyTokenMax).regex(revokePushTokenBodyTokenRegExp)
+})
+
+export const RevokePushTokenResponse = zod.void()
+
+
+/**
+ * @summary Send a generic test notification to the authenticated account
+ */
+export const sendPushTestResponseAcceptedCountMin = 0;
+
+
+
+export const SendPushTestResponse = zod.object({
+  "acceptedCount": zod.number().int().min(sendPushTestResponseAcceptedCountMin)
+})
 
 

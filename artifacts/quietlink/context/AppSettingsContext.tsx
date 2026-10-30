@@ -1,6 +1,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import { setLocalNotificationPreference } from '@/services/quietLinkNotifications';
+import {
+  setLocalNotificationPreference,
+  setRemotePushPreference,
+} from '@/services/quietLinkNotifications';
 
 export type RingtoneName = 'soft' | 'classic' | 'pulse';
 export type VibrationPattern = 'off' | 'short' | 'double';
@@ -11,6 +14,7 @@ export type AppSettings = {
   vibrationPattern: VibrationPattern;
   chatSoundsEnabled: boolean;
   localNotificationsEnabled: boolean;
+  pushNotificationsEnabled: boolean;
 };
 
 type AppSettingsContextValue = {
@@ -26,6 +30,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   vibrationPattern: 'double',
   chatSoundsEnabled: true,
   localNotificationsEnabled: false,
+  pushNotificationsEnabled: false,
 };
 const secureOptions: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
@@ -47,6 +52,7 @@ function parseSettings(value: string | null): AppSettings {
       vibrationPattern,
       chatSoundsEnabled: saved.chatSoundsEnabled !== false,
       localNotificationsEnabled: saved.localNotificationsEnabled === true,
+      pushNotificationsEnabled: saved.pushNotificationsEnabled === true,
     };
   } catch {
     return DEFAULT_SETTINGS;
@@ -67,6 +73,7 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
         settingsRef.current = saved;
         setSettings(saved);
         setLocalNotificationPreference(saved.localNotificationsEnabled);
+        setRemotePushPreference(saved.pushNotificationsEnabled);
       })
       .catch(() => {
         // Preferences stay in memory if protected storage is unavailable.
@@ -83,6 +90,9 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
     setSettings(next);
     if (patch.localNotificationsEnabled !== undefined) {
       setLocalNotificationPreference(next.localNotificationsEnabled);
+    }
+    if (patch.pushNotificationsEnabled !== undefined) {
+      setRemotePushPreference(next.pushNotificationsEnabled);
     }
     try {
       await SecureStore.setItemAsync(SETTINGS_KEY, JSON.stringify(next), secureOptions);

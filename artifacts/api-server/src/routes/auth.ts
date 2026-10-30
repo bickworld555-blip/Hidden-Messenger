@@ -1,6 +1,14 @@
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { Router, type Request } from "express";
 import { logger } from "../lib/logger";
+import {
+  allowPushTest,
+  derivePushAccountId,
+  isExpoPushToken,
+  registerExpoPushToken,
+  revokeExpoPushToken,
+  sendGenericPushNotification,
+} from "../lib/pushNotifications";
 
 const router = Router();
 
@@ -282,8 +290,10 @@ router.post("/auth/otp/verify", (req, res) => {
   const accessToken = randomBytes(32).toString("base64url");
   const expiresAt = now + SESSION_TTL_MS;
   sessions.set(hashKey(accessToken), { phone, expiresAt });
+  const accountId = derivePushAccountId(phone, otpSecret);
   res.status(200).json({
     accessToken,
+    accountId,
     phone,
     expiresAt: new Date(expiresAt).toISOString(),
   });
@@ -296,10 +306,98 @@ router.get("/auth/session", (req, res) => {
     sendError(res, 401, "UNAUTHENTICATED", "Sign in again to continue.");
     return;
   }
+  const sessionSecret = process.env["SESSION_SECRET"];
+  if (!sessionSecret) {
+    sendError(res, 503, "AUTH_NOT_CONFIGURED", "Phone verification is not configured on the server.");
+    return;
+  }
   res.status(200).json({
+    accountId: derivePushAccountId(authenticated.session.phone, sessionSecret),
     phone: authenticated.session.phone,
     expiresAt: new Date(authenticated.session.expiresAt).toISOString(),
   });
+});
+
+router.post("/auth/push-token", (req, res) => {
+  const authenticated = getSessionFromRequest(req);
+  if (!authenticated) {
+    sendError(res, 401, "UNAUTHENTICATED", "Sign in again to continue.");
+    return;
+  }
+  const token = (req.body as { token?: unknown } | undefined)?.token;
+  if (!isExpoPushToken(token)) {
+    sendError(res, 400, "INVALID_PUSH_TOKEN", "The device push token is invalid.");
+    return;
+  }
+  const sessionSecret = process.env["SESSION_SECRET"];
+  if (!sessionSecret) {
+    sendError(res, 503, "AUTH_NOT_CONFIGURED", "Phone verification is not configured on the server.");
+    return;
+  }
+  const accountId = derivePushAccountId(authenticated.session.phone, sessionSecret);
+  const registered = registerExpoPushToken(accountId, token, authenticated.session.expiresAt);
+  if (!registered) {
+    sendError(res, 429, "PUSH_DEVICE_LIMIT", "This account has reached its registered device limit.");
+    return;
+  }
+  res.status(204).end();
+});
+
+router.post("/auth/push-token/revoke", (req, res) => {
+  const authenticated = getSessionFromRequest(req);
+  if (!authenticated) {
+    sendError(res, 401, "UNAUTHENTICATED", "Sign in again to continue.");
+    return;
+  }
+  const token = (req.body as { token?: unknown } | undefined)?.token;
+  if (!isExpoPushToken(token)) {
+    sendError(res, 400, "INVALID_PUSH_TOKEN", "The device push token is invalid.");
+    return;
+  }
+  const sessionSecret = process.env["SESSION_SECRET"];
+  if (!sessionSecret) {
+    sendError(res, 503, "AUTH_NOT_CONFIGURED", "Phone verification is not configured on the server.");
+    return;
+  }
+  const accountId = derivePushAccountId(authenticated.session.phone, sessionSecret);
+  revokeExpoPushToken(accountId, token);
+  res.status(204).end();
+});
+
+router.post("/auth/push-test", async (req, res) => {
+  const authenticated = getSessionFromRequest(req);
+  if (!authenticated) {
+    sendError(res, 401, "UNAUTHENTICATED", "Sign in again to continue.");
+    return;
+  }
+  const sessionSecret = process.env["SESSION_SECRET"];
+  if (!sessionSecret) {
+    sendError(res, 503, "AUTH_NOT_CONFIGURED", "Phone verification is not configured on the server.");
+    return;
+  }
+  const accountId = derivePushAccountId(authenticated.session.phone, sessionSecret);
+  if (!allowPushTest(accountId)) {
+    sendError(res, 429, "PUSH_TEST_RATE_LIMITED", "Wait before sending another test alert.");
+    return;
+  }
+  try {
+    const result = await sendGenericPushNotification({
+      accountId,
+      type: "test",
+      routeId: randomBytes(16).toString("hex"),
+    });
+    if (!result.tokenCount) {
+      sendError(res, 409, "PUSH_NOT_REGISTERED", "Enable generic notifications on this device first.");
+      return;
+    }
+    if (!result.acceptedCount) {
+      sendError(res, 503, "PUSH_DELIVERY_FAILED", "The push provider could not accept the test alert.");
+      return;
+    }
+    res.status(202).json({ acceptedCount: result.acceptedCount });
+  } catch {
+    sendError(res, 503, "PUSH_DELIVERY_FAILED", "The push provider could not accept the test alert.");
+  }
 });
 
 router.post("/auth/logout", (req, res) => {

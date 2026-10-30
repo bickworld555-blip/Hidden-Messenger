@@ -9,9 +9,11 @@ import {
   setBaseUrl,
   verifyOtp as verifyOtpApi,
 } from "@workspace/api-client-react";
+import { disableRemotePushNotifications } from "@/services/quietLinkNotifications";
 
 const SESSION_TOKEN_KEY = "quietlink.auth.access-token.v1";
 const SESSION_PHONE_KEY = "quietlink.auth.phone.v1";
+const SESSION_ACCOUNT_ID_KEY = "quietlink.auth.account-id.v1";
 const secureStoreOptions: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
 };
@@ -27,6 +29,7 @@ export type AuthStatus = "loading" | "signedIn" | "signedOut";
 
 type AuthSession = {
   phone: string | null;
+  accountId: string | null;
 };
 
 type OtpRequestResult = {
@@ -68,6 +71,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const token = await SecureStore.getItemAsync(SESSION_TOKEN_KEY, secureStoreOptions);
         const savedPhone = await SecureStore.getItemAsync(SESSION_PHONE_KEY, secureStoreOptions);
+        const savedAccountId = await SecureStore.getItemAsync(SESSION_ACCOUNT_ID_KEY, secureStoreOptions);
         if (!token) {
           if (active) {
             setSession(null);
@@ -79,20 +83,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try {
           const serverSession = await getAuthSession();
           if (active) {
-            setSession({ phone: serverSession.phone });
+            setSession({ phone: serverSession.phone, accountId: serverSession.accountId });
             setStatus("signedIn");
           }
+          await SecureStore.setItemAsync(SESSION_ACCOUNT_ID_KEY, serverSession.accountId, secureStoreOptions).catch(() => undefined);
         } catch (error) {
           if (errorStatus(error) === 401) {
             await SecureStore.deleteItemAsync(SESSION_TOKEN_KEY, secureStoreOptions);
             await SecureStore.deleteItemAsync(SESSION_PHONE_KEY, secureStoreOptions);
+            await SecureStore.deleteItemAsync(SESSION_ACCOUNT_ID_KEY, secureStoreOptions);
             if (active) {
               setSession(null);
               setStatus("signedOut");
             }
           } else if (active) {
             // Preserve a device session during a temporary network outage.
-            setSession({ phone: savedPhone });
+            setSession({ phone: savedPhone, accountId: savedAccountId });
             setStatus("signedIn");
           }
         }
@@ -125,17 +131,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await SecureStore.setItemAsync(SESSION_TOKEN_KEY, response.accessToken, secureStoreOptions);
       await SecureStore.setItemAsync(SESSION_PHONE_KEY, response.phone, secureStoreOptions);
+      await SecureStore.setItemAsync(SESSION_ACCOUNT_ID_KEY, response.accountId, secureStoreOptions);
     } catch {
       await SecureStore.deleteItemAsync(SESSION_TOKEN_KEY, secureStoreOptions).catch(() => undefined);
       await SecureStore.deleteItemAsync(SESSION_PHONE_KEY, secureStoreOptions).catch(() => undefined);
+      await SecureStore.deleteItemAsync(SESSION_ACCOUNT_ID_KEY, secureStoreOptions).catch(() => undefined);
       throw new Error("Hidden Messenger could not save the session in secure device storage.");
     }
-    setSession({ phone: response.phone });
+    setSession({ phone: response.phone, accountId: response.accountId });
     setStatus("signedIn");
   }, []);
 
   const signOut = useCallback(async () => {
     if (isNativeAuthAvailable) {
+      await disableRemotePushNotifications().catch(() => false);
       try {
         await logoutAuthSession();
       } catch {
@@ -143,6 +152,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       await SecureStore.deleteItemAsync(SESSION_TOKEN_KEY, secureStoreOptions).catch(() => undefined);
       await SecureStore.deleteItemAsync(SESSION_PHONE_KEY, secureStoreOptions).catch(() => undefined);
+      await SecureStore.deleteItemAsync(SESSION_ACCOUNT_ID_KEY, secureStoreOptions).catch(() => undefined);
     }
     setSession(null);
     setStatus("signedOut");

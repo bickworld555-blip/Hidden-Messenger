@@ -31,13 +31,31 @@ export interface OtpVerification {
 
 export interface AuthSessionToken {
   accessToken: string;
+  /** @pattern ^[A-Za-z0-9_-]{43}$ */
+  accountId: string;
   phone: string;
   expiresAt: string;
 }
 
 export interface AuthSession {
+  /** @pattern ^[A-Za-z0-9_-]{43}$ */
+  accountId: string;
   phone: string;
   expiresAt: string;
+}
+
+export interface PushTokenInput {
+  /**
+     * @minLength 30
+     * @maxLength 256
+     * @pattern ^(Expo|Exponent)PushToken\[[A-Za-z0-9_-]{20,240}\]$
+     */
+  token: string;
+}
+
+export interface PushTestAccepted {
+  /** @minimum 0 */
+  acceptedCount: number;
 }
 
 export interface AuthError {

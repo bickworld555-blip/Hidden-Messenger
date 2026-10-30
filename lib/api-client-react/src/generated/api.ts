@@ -26,7 +26,9 @@ import type {
   HealthStatus,
   OtpRequest,
   OtpRequestAccepted,
-  OtpVerification
+  OtpVerification,
+  PushTestAccepted,
+  PushTokenInput
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -459,5 +461,255 @@ export const useLogoutAuthSession = <TError = ErrorType<AuthError>,
         TContext
       > => {
       return useMutation(getLogoutAuthSessionMutationOptions(options));
+    }
+
+export const getRegisterPushTokenUrl = () => {
+
+
+
+
+  return `/api/auth/push-token`
+}
+
+/**
+ * @summary Register an Expo push token for the authenticated device
+ */
+export const registerPushToken = async (pushTokenInput: PushTokenInput, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<void>(getRegisterPushTokenUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(pushTokenInput)
+  }
+);}
+
+
+
+
+
+export const getRegisterPushTokenMutationKey = () => ['registerPushToken'] as const;
+
+export const getRegisterPushTokenMutationOptions = <TError = ErrorType<AuthError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof registerPushToken>>, TError,RegisterPushTokenMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof registerPushToken>>, TError,RegisterPushTokenMutationVariables, TContext> => {
+
+const mutationKey = getRegisterPushTokenMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof registerPushToken>>, RegisterPushTokenMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  registerPushToken(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RegisterPushTokenMutationResult = NonNullable<Awaited<ReturnType<typeof registerPushToken>>>
+    export type RegisterPushTokenMutationBody = BodyType<PushTokenInput>
+    export type RegisterPushTokenMutationError = ErrorType<AuthError>
+    export type RegisterPushTokenMutationVariables = {data: BodyType<PushTokenInput>}
+
+    /**
+ * @summary Register an Expo push token for the authenticated device
+ */
+export const useRegisterPushToken = <TError = ErrorType<AuthError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof registerPushToken>>, TError,RegisterPushTokenMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof registerPushToken>>,
+        TError,
+        RegisterPushTokenMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRegisterPushTokenMutationOptions(options));
+    }
+
+export const getRevokePushTokenUrl = () => {
+
+
+
+
+  return `/api/auth/push-token/revoke`
+}
+
+/**
+ * @summary Revoke a registered Expo push token for the authenticated device
+ */
+export const revokePushToken = async (pushTokenInput: PushTokenInput, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<void>(getRevokePushTokenUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(pushTokenInput)
+  }
+);}
+
+
+
+
+
+export const getRevokePushTokenMutationKey = () => ['revokePushToken'] as const;
+
+export const getRevokePushTokenMutationOptions = <TError = ErrorType<AuthError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokePushToken>>, TError,RevokePushTokenMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof revokePushToken>>, TError,RevokePushTokenMutationVariables, TContext> => {
+
+const mutationKey = getRevokePushTokenMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof revokePushToken>>, RevokePushTokenMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  revokePushToken(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RevokePushTokenMutationResult = NonNullable<Awaited<ReturnType<typeof revokePushToken>>>
+    export type RevokePushTokenMutationBody = BodyType<PushTokenInput>
+    export type RevokePushTokenMutationError = ErrorType<AuthError>
+    export type RevokePushTokenMutationVariables = {data: BodyType<PushTokenInput>}
+
+    /**
+ * @summary Revoke a registered Expo push token for the authenticated device
+ */
+export const useRevokePushToken = <TError = ErrorType<AuthError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokePushToken>>, TError,RevokePushTokenMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof revokePushToken>>,
+        TError,
+        RevokePushTokenMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRevokePushTokenMutationOptions(options));
+    }
+
+export const getSendPushTestUrl = () => {
+
+
+
+
+  return `/api/auth/push-test`
+}
+
+/**
+ * @summary Send a generic test notification to the authenticated account
+ */
+export const sendPushTest = async ( options?: Parameters<typeof customFetch>[1]): Promise<PushTestAccepted> => {
+
+  return customFetch<PushTestAccepted>(getSendPushTestUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getSendPushTestMutationKey = () => ['sendPushTest'] as const;
+
+export const getSendPushTestMutationOptions = <TError = ErrorType<AuthError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendPushTest>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof sendPushTest>>, TError,void, TContext> => {
+
+const mutationKey = getSendPushTestMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof sendPushTest>>, void> = () => {
+
+
+          return  sendPushTest(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SendPushTestMutationResult = NonNullable<Awaited<ReturnType<typeof sendPushTest>>>
+
+    export type SendPushTestMutationError = ErrorType<AuthError>
+
+
+    /**
+ * @summary Send a generic test notification to the authenticated account
+ */
+export const useSendPushTest = <TError = ErrorType<AuthError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendPushTest>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof sendPushTest>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getSendPushTestMutationOptions(options));
     }
 
