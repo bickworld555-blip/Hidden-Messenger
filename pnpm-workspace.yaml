@@ -162,6 +162,3 @@ overrides:
   rollup>@rollup/rollup-win32-x64-gnu: '-'
   rollup>@rollup/rollup-win32-x64-msvc: '-'
   source-map-js@^1: ^1.2.2
-
-patchedDependencies:
-  expo-notifications@58.1.4: patches/expo-notifications@58.1.4.patch
