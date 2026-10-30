@@ -22,7 +22,10 @@ import { useAppSettings } from '@/context/AppSettingsContext';
 import { useColors } from '@/hooks/useColors';
 import { parseCallInvite, type CallMode } from '@/security/secureCallVerification';
 import { requestDevicePermission } from '@/services/devicePermissions';
-import { createSecureCallSession } from '@/services/secureCallSession';
+import {
+  createSecureCallSession,
+  getSecureCallTransportAvailability,
+} from '@/services/secureCallSession';
 import { notifyVoiceNoteInterruption } from '@/storage/voiceNoteInterruption';
 import type {
   SecureCallController,
@@ -48,6 +51,7 @@ export default function CallScreen() {
     invite?: string;
   }>();
   const { settings } = useAppSettings();
+  const [transportAvailability] = useState(() => getSecureCallTransportAvailability());
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const name = String(params.name || 'Hidden Messenger call');
   const mode: CallMode = params.mode === 'video' ? 'video' : 'audio';
@@ -64,7 +68,11 @@ export default function CallScreen() {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scanError, setScanError] = useState('');
   const [duration, setDuration] = useState(0);
-  const [pageError, setPageError] = useState('');
+  const [pageError, setPageError] = useState(
+    transportAvailability.available
+      ? ''
+      : transportAvailability.reason ?? 'Secure WebRTC calls are unavailable in this app build.',
+  );
   const tonePlayer = useAudioPlayer(SOUND_ASSETS.ringback);
   const endTonePlayer = useAudioPlayer(SOUND_ASSETS.ended);
 
@@ -122,8 +130,8 @@ export default function CallScreen() {
     let mounted = true;
     let session: SecureCallController | null = null;
     const start = async () => {
-      if (Platform.OS === 'web') {
-        setPageError('Secure WebRTC calls require a rebuilt native iOS or Android app.');
+      if (!transportAvailability.available) {
+        setPageError(transportAvailability.reason ?? 'Secure WebRTC calls are unavailable in this app build.');
         return;
       }
       if (!await requestCallPermissions('host') || !mounted) return;
@@ -146,7 +154,7 @@ export default function CallScreen() {
     };
     // The outgoing session is created once when the user opens this route.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [role, mode]);
+  }, [role, mode, transportAvailability]);
 
   useEffect(() => {
     if (snapshot?.status !== 'active') {
@@ -187,12 +195,12 @@ export default function CallScreen() {
   };
 
   const acceptInvitation = async () => {
-    if (!invite) {
-      setPageError('This call invitation is invalid or expired. Ask the caller to create a new QR code.');
+    if (!transportAvailability.available) {
+      setPageError(transportAvailability.reason ?? 'Secure WebRTC calls are unavailable in this app build.');
       return;
     }
-    if (Platform.OS === 'web') {
-      setPageError('Secure WebRTC calls require a rebuilt native iOS or Android app.');
+    if (!invite) {
+      setPageError('This call invitation is invalid or expired. Ask the caller to create a new QR code.');
       return;
     }
     if (!await requestCallPermissions('joiner')) return;
@@ -377,13 +385,13 @@ export default function CallScreen() {
                 </Pressable>
                 <Pressable
                   onPress={() => void acceptInvitation()}
-                  disabled={permissionBusy || !invite}
-                  style={[styles.primaryButton, { backgroundColor: colors.primary, opacity: permissionBusy || !invite ? 0.55 : 1 }]}
+                  disabled={permissionBusy || !invite || !transportAvailability.available}
+                  style={[styles.primaryButton, { backgroundColor: colors.primary, opacity: permissionBusy || !invite || !transportAvailability.available ? 0.55 : 1 }]}
                   accessibilityRole="button"
                   accessibilityLabel="Accept secure call invitation"
                 >
                   <Feather name="phone" size={17} color={colors.primaryForeground} />
-                  <Text style={[styles.primaryButtonText, { color: colors.primaryForeground }]}>{permissionBusy ? 'Checking' : 'Join call'}</Text>
+                  <Text style={[styles.primaryButtonText, { color: colors.primaryForeground }]}>{permissionBusy ? 'Checking' : transportAvailability.available ? 'Join call' : 'Unavailable in this build'}</Text>
                 </Pressable>
               </View>
             ) : null}

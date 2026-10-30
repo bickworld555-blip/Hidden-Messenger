@@ -1,4 +1,5 @@
 import * as Crypto from 'expo-crypto';
+import { NativeModules, Platform } from 'react-native';
 import type {
   MediaStream,
   MediaStreamTrack,
@@ -21,6 +22,8 @@ import type {
   SecureCallSnapshot,
   SecureCallStatus,
 } from '@/services/secureCallSession.types';
+import { getSecureCallAvailability } from '@/security/secureCallAvailability';
+import { createUnavailableSecureCallSession } from '@/services/unavailableSecureCallSession';
 
 type JsonRecord = Record<string, unknown>;
 type RTCDataChannel = ReturnType<RTCPeerConnection['createDataChannel']>;
@@ -45,6 +48,10 @@ const ICE_SERVERS = [
     urls: process.env.EXPO_PUBLIC_STUN_URL || 'stun:stun.l.google.com:19302',
   },
 ];
+
+export function getSecureCallTransportAvailability() {
+  return getSecureCallAvailability(Platform.OS, NativeModules?.WebRTCModule);
+}
 
 class NativeSecureCallSession implements SecureCallController {
   readonly role: SecureCallRole;
@@ -100,6 +107,10 @@ class NativeSecureCallSession implements SecureCallController {
   async startOutgoing() {
     if (this.role !== 'host') throw new Error('This call session cannot create an invitation.');
     try {
+      const availability = getSecureCallTransportAvailability();
+      if (!availability.available) {
+        throw new Error(availability.reason ?? 'Native WebRTC is unavailable.');
+      }
       await this.connectSignaling();
       const createdPromise = this.waitForServerMessage(
         (message) => message.type === 'created' || message.type === 'error',
@@ -135,6 +146,10 @@ class NativeSecureCallSession implements SecureCallController {
       throw new Error('This call invitation is invalid or has expired.');
     }
     try {
+      const availability = getSecureCallTransportAvailability();
+      if (!availability.available) {
+        throw new Error(availability.reason ?? 'Native WebRTC is unavailable.');
+      }
       this.invite = invite;
       await this.connectSignaling();
       await this.initializePeerConnection();
@@ -262,6 +277,10 @@ class NativeSecureCallSession implements SecureCallController {
     if (this.peerConnection) return;
     if (this.role !== 'host' && this.role !== 'joiner') {
       throw new Error('Unsupported call participant role.');
+    }
+    const availability = getSecureCallTransportAvailability();
+    if (!availability.available) {
+      throw new Error(availability.reason ?? 'Native WebRTC is unavailable.');
     }
     try {
       this.webRTC = await import('react-native-webrtc');
@@ -612,5 +631,13 @@ export function createSecureCallSession(
   role: SecureCallRole,
   mode: CallMode,
 ): SecureCallController {
+  const availability = getSecureCallTransportAvailability();
+  if (!availability.available) {
+    return createUnavailableSecureCallSession(
+      role,
+      mode,
+      availability.reason ?? 'Native WebRTC is unavailable in this app build.',
+    );
+  }
   return new NativeSecureCallSession(role, mode);
 }
