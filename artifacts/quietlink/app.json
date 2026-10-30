@@ -7,11 +7,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "quietlink",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "backgroundColor": "#F4F7F6",
-      "image": "./assets/images/icon.png",
-      "resizeMode": "contain"
-    },
     "ios": {
       "supportsTablet": false,
       "deploymentTarget": "15.1",
@@ -20,15 +15,33 @@
         "CFBundleDisplayName": "Hidden Messenger"
       }
     },
-    "android": {
-      "minSdkVersion": 24
-    },
     "web": {
       "favicon": "./assets/images/icon.png",
-      "output": "static"
+      "output": "static",
+      "splash": {
+        "backgroundColor": "#F4F7F6",
+        "image": "./assets/images/icon.png",
+        "resizeMode": "contain"
+      }
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#F4F7F6",
+          "image": "./assets/images/icon.png",
+          "resizeMode": "contain"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 24
+          }
+        }
+      ],
       [
         "expo-sqlite",
         {
@@ -75,7 +88,6 @@
         }
       ]
     ],
-    "newArchEnabled": true,
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
