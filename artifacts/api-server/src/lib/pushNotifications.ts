@@ -26,6 +26,10 @@ type PushMessage = {
 };
 type ReceiptRef = { accountId: string; tokenFingerprint: string; ticketId: string };
 type PushTokenKeys = { encryption: Buffer; fingerprint: Buffer };
+type PushNotificationServiceOptions = {
+  retrySleep?: (milliseconds: number) => Promise<void>;
+  receiptCheckDelayMs?: number;
+};
 
 const testCooldowns = new Map<string, number>();
 const TOKEN_ENVELOPE_VERSION = "v1";
@@ -181,7 +185,13 @@ export function allowPushTest(accountId: string) {
   return true;
 }
 
-export function createPushNotificationService(persistence: PushTokenPersistence) {
+export function createPushNotificationService(
+  persistence: PushTokenPersistence,
+  options: PushNotificationServiceOptions = {},
+) {
+  const retrySleep = options.retrySleep ?? sleepFor;
+  const receiptCheckDelayMs = options.receiptCheckDelayMs ?? RECEIPT_CHECK_DELAY_MS;
+
   return {
     async pruneExpiredRegistrations() {
       await persistence.pruneExpired(Date.now());
@@ -299,7 +309,7 @@ export function createPushNotificationService(persistence: PushTokenPersistence)
       const accessToken = process.env["EXPO_ACCESS_TOKEN"];
       if (accessToken) headers.authorization = `Bearer ${accessToken}`;
 
-      const response = await postToExpo(PUSH_ENDPOINT, messages, headers, fetcher);
+      const response = await postToExpo(PUSH_ENDPOINT, messages, headers, fetcher, retrySleep);
       const payload = await response.json().catch(() => null);
       const tickets =
         payload && typeof payload === "object" && "data" in payload && Array.isArray(payload.data)
@@ -334,7 +344,14 @@ export function createPushNotificationService(persistence: PushTokenPersistence)
         }
       }
       if (receiptRefs.length) {
-        scheduleReceiptCheck(receiptRefs, persistence, headers, fetcher);
+        scheduleReceiptCheck(
+          receiptRefs,
+          persistence,
+          headers,
+          fetcher,
+          retrySleep,
+          receiptCheckDelayMs,
+        );
       }
       return { acceptedCount, tokenCount: tokens.length };
     },
@@ -377,7 +394,17 @@ export async function sendGenericPushNotification(
   return (await getPersistentPushService()).sendGenericPushNotification(input, fetcher);
 }
 
-async function postToExpo(url: string, body: unknown, headers: Record<string, string>, fetcher: typeof fetch) {
+function sleepFor(milliseconds: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function postToExpo(
+  url: string,
+  body: unknown,
+  headers: Record<string, string>,
+  fetcher: typeof fetch,
+  retrySleep: (milliseconds: number) => Promise<void>,
+) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       const response = await fetcher(url, {
@@ -397,7 +424,7 @@ async function postToExpo(url: string, body: unknown, headers: Record<string, st
         throw new Error("The push provider is temporarily unavailable.");
       }
     }
-    await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
+    await retrySleep(250 * 2 ** attempt);
   }
   throw new Error("The push provider is temporarily unavailable.");
 }
@@ -407,6 +434,8 @@ function scheduleReceiptCheck(
   persistence: PushTokenPersistence,
   headers: Record<string, string>,
   fetcher: typeof fetch,
+  retrySleep: (milliseconds: number) => Promise<void>,
+  delayMs: number,
 ) {
   const timer = setTimeout(() => {
     void (async () => {
@@ -416,6 +445,7 @@ function scheduleReceiptCheck(
           { ids: receipts.map((receipt) => receipt.ticketId) },
           headers,
           fetcher,
+          retrySleep,
         );
         const payload = await response.json().catch(() => null);
         const data =
@@ -438,6 +468,6 @@ function scheduleReceiptCheck(
         // Receipt lookup errors do not expose notification payloads.
       }
     })();
-  }, RECEIPT_CHECK_DELAY_MS);
+  }, delayMs);
   timer.unref?.();
 }

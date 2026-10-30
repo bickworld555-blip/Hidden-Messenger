@@ -79,7 +79,7 @@ test("encrypted registrations are available to a new service instance after rest
   );
 
   const stored = [...persistence.records.values()][0];
-  assert.notEqual(stored.encryptedToken, pushToken);
+  assert.equal(stored.encryptedToken !== pushToken, true);
   assert.match(stored.encryptedToken, /^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
 
   let requestBody;
@@ -96,7 +96,7 @@ test("encrypted registrations are available to a new service instance after rest
 
   assert.deepEqual(result, { acceptedCount: 1, tokenCount: 1 });
   assert.equal(requestBody.length, 1);
-  assert.equal(requestBody[0].to, pushToken);
+  assert.equal(requestBody[0].to === pushToken, true);
   assert.equal(requestBody[0].title, "Hidden Messenger");
   assert.equal(requestBody[0].body, "New message");
   assert.deepEqual(requestBody[0].data, {
@@ -220,6 +220,134 @@ test("provider rejection removes stale tokens from persistent storage", async ()
   }, async () => {
     assert.fail("Stale token must be pruned");
   }), { acceptedCount: 0, tokenCount: 0 });
+});
+
+test("delayed DeviceNotRegistered receipts remove the device registration", async () => {
+  const persistence = createMemoryPersistence();
+  const accountId = account("delayed-receipt");
+  const pushToken = token("delayed-device");
+  let resolveRemoved;
+  const removed = new Promise((resolve) => {
+    resolveRemoved = resolve;
+  });
+  const remove = persistence.remove;
+  persistence.remove = async (registeredAccountId, fingerprint) => {
+    await remove(registeredAccountId, fingerprint);
+    resolveRemoved();
+  };
+  const service = createPushNotificationService(persistence, {
+    receiptCheckDelayMs: 0,
+    retrySleep: async () => {},
+  });
+  await service.registerExpoPushToken(accountId, pushToken, Date.now() + 60_000);
+
+  let sendCount = 0;
+  let receiptCount = 0;
+  const result = await service.sendGenericPushNotification({
+    accountId,
+    type: "test",
+    routeId: "f47ac10b58cc4372a5670e02b2c3d479",
+  }, async (url, init) => {
+    if (url.endsWith("/push/send")) {
+      sendCount += 1;
+      return makeFetchResponse({ status: "ok", id: "delayed-ticket" });
+    }
+    assert.equal(url, "https://exp.host/--/api/v2/push/getReceipts");
+    receiptCount += 1;
+    assert.deepEqual(JSON.parse(init.body), { ids: ["delayed-ticket"] });
+    return new Response(JSON.stringify({
+      data: {
+        "delayed-ticket": {
+          status: "error",
+          details: { error: "DeviceNotRegistered" },
+        },
+      },
+    }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+
+  assert.deepEqual(result, { acceptedCount: 1, tokenCount: 1 });
+  await Promise.race([
+    removed,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("receipt cleanup timed out")), 1_000)),
+  ]);
+  assert.equal(sendCount, 1);
+  assert.equal(receiptCount, 1);
+  assert.equal(persistence.records.size, 0);
+});
+
+test("429 provider responses retry twice with bounded deterministic delays", async () => {
+  const persistence = createMemoryPersistence();
+  const accountId = account("retry-429");
+  const service = createPushNotificationService(persistence, {
+    retrySleep: async (milliseconds) => delays.push(milliseconds),
+  });
+  const delays = [];
+  await service.registerExpoPushToken(accountId, token("retry-429-device"), Date.now() + 60_000);
+
+  let attempts = 0;
+  const result = await service.sendGenericPushNotification({
+    accountId,
+    type: "test",
+    routeId: "f47ac10b58cc4372a5670e02b2c3d479",
+  }, async () => {
+    attempts += 1;
+    return attempts < 3
+      ? new Response(null, { status: 429 })
+      : makeFetchResponse({ status: "ok" });
+  });
+
+  assert.deepEqual(result, { acceptedCount: 1, tokenCount: 1 });
+  assert.equal(attempts, 3);
+  assert.deepEqual(delays, [250, 500]);
+});
+
+test("repeated server errors stop after three attempts with a generic error", async () => {
+  const persistence = createMemoryPersistence();
+  const accountId = account("retry-5xx");
+  const delays = [];
+  const service = createPushNotificationService(persistence, {
+    retrySleep: async (milliseconds) => delays.push(milliseconds),
+  });
+  await service.registerExpoPushToken(accountId, token("retry-5xx-device"), Date.now() + 60_000);
+
+  let attempts = 0;
+  await assert.rejects(service.sendGenericPushNotification({
+    accountId,
+    type: "message",
+    routeId: "f47ac10b58cc4372a5670e02b2c3d479",
+  }, async () => {
+    attempts += 1;
+    return new Response(null, { status: 503 });
+  }), { message: "The push provider could not accept the alert." });
+  assert.equal(attempts, 3);
+  assert.deepEqual(delays, [250, 500]);
+});
+
+test("provider failures do not expose device tokens or message text", async () => {
+  const persistence = createMemoryPersistence();
+  const accountId = account("generic-errors");
+  const pushToken = token("generic-error-device");
+  const privateText = "synthetic private message text";
+  const service = createPushNotificationService(persistence, {
+    retrySleep: async () => {},
+  });
+  await service.registerExpoPushToken(accountId, pushToken, Date.now() + 60_000);
+
+  await assert.rejects(service.sendGenericPushNotification({
+    accountId,
+    type: "message",
+    routeId: "f47ac10b58cc4372a5670e02b2c3d479",
+  }, async () => {
+    throw new Error(`${pushToken} ${privateText}`);
+  }), (error) => {
+    assert.equal(error.message, "The push provider is temporarily unavailable.");
+    assert.equal(error.message.includes(pushToken), false);
+    assert.equal(error.message.includes(privateText), false);
+    return true;
+  });
 });
 
 test("tampered encrypted tokens are discarded without a provider send", async () => {

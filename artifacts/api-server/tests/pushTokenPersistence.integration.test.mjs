@@ -44,7 +44,7 @@ test("a registration survives a service restart using the shared database", {
     });
 
     assert.deepEqual(result, { acceptedCount: 1, tokenCount: 1 });
-    assert.equal(sentPayload[0].to, pushToken);
+    assert.equal(sentPayload[0].to === pushToken, true);
     assert.equal(sentPayload[0].body, "Notifications are enabled");
   } finally {
     await firstService.revokeExpoPushToken(accountId, pushToken);
