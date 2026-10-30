@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { inspect } from "node:util";
@@ -53,10 +54,25 @@ function captureConsole() {
   };
 }
 
+function noMessageFor(socket, durationMs = 40) {
+  return new Promise((resolve, reject) => {
+    const onMessage = (data) => {
+      clearTimeout(timer);
+      socket.off("message", onMessage);
+      reject(new Error(`Unexpected message received: ${data.toString()}`));
+    };
+    const timer = setTimeout(() => {
+      socket.off("message", onMessage);
+      resolve();
+    }, durationMs);
+    socket.on("message", onMessage);
+  });
+}
+
 async function startGateway(options) {
   const server = createServer();
   const clients = [];
-  attachSignalingGateway(server, options);
+  attachSignalingGateway(server, { maxConnectionsPerIpPerMinute: 100, ...options });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);
@@ -97,6 +113,22 @@ async function createPairing(gateway, socket) {
   const message = await response;
   assert.equal(message.type, "created");
   return message;
+}
+
+async function createJoinedPair(gateway) {
+  const host = await gateway.connect();
+  const pairing = await createPairing(gateway, host);
+  const peer = await gateway.connect();
+  const hostPeerJoined = nextJson(host);
+  const peerJoined = nextJson(peer);
+  sendJson(peer, {
+    action: "join",
+    roomId: pairing.roomId,
+    joinToken: pairing.joinToken,
+  });
+  assert.equal((await peerJoined).type, "joined");
+  assert.deepEqual(await hostPeerJoined, { type: "peer-joined" });
+  return { host, peer, ...pairing };
 }
 
 async function waitUntilExpired(expiresAt) {
@@ -289,6 +321,186 @@ test("a peer disconnect invalidates the pairing and closes the remaining socket"
     const replacementHost = await gateway.connect();
     assert.equal((await createPairing(gateway, replacementHost)).type, "created");
     assert.equal(captured.lines.join("\n").includes(pairing.joinToken), false);
+  } finally {
+    await gateway.close();
+    captured.restore();
+  }
+});
+
+test("only offer, answer, and ICE signals are relayed without persistence or payload logs", async () => {
+  const captured = captureConsole();
+  const gateway = await startGateway({ sessionTtlMs: 5_000, cleanupIntervalMs: 10_000 });
+  const markers = [
+    "private-offer-sdp-marker",
+    "private-answer-sdp-marker",
+    "private-ice-candidate-marker",
+    "private-chat-body-marker",
+    "private-json-media-marker",
+    "private-media-signal-marker",
+    "private-unknown-field-marker",
+    "private-binary-frame-marker",
+  ];
+
+  try {
+    const { host, peer, roomId } = await createJoinedPair(gateway);
+    const offer = { type: "offer", sdp: markers[0] };
+    const answer = { type: "answer", sdp: markers[1] };
+    const ice = {
+      type: "ice",
+      candidate: markers[2],
+      sdpMid: "audio",
+      sdpMLineIndex: 0,
+    };
+
+    for (const [sender, receiver, signal] of [
+      [peer, host, offer],
+      [host, peer, answer],
+      [peer, host, ice],
+    ]) {
+      const relayed = nextJson(receiver);
+      sendJson(sender, { action: "signal", roomId, signal });
+      assert.deepEqual(await relayed, { type: "signal", signal });
+    }
+
+    const rejectedMessages = [
+      {
+        sender: host,
+        receiver: peer,
+        message: { action: "message", roomId, body: markers[3] },
+        error: { type: "error", code: "unsupported_message" },
+      },
+      {
+        sender: host,
+        receiver: peer,
+        message: { action: "media", roomId, payload: markers[4] },
+        error: { type: "error", code: "unsupported_message" },
+      },
+      {
+        sender: peer,
+        receiver: host,
+        message: {
+          action: "signal",
+          roomId,
+          signal: { type: "media", payload: markers[5] },
+        },
+        error: { type: "error", code: "invalid_signal" },
+      },
+      {
+        sender: peer,
+        receiver: host,
+        message: {
+          action: "signal",
+          roomId,
+          extra: markers[6],
+          signal: { type: "ice", candidate: "candidate:valid" },
+        },
+        error: { type: "error", code: "invalid_signal" },
+      },
+      {
+        sender: peer,
+        receiver: host,
+        message: {
+          action: "signal",
+          roomId,
+          signal: { type: "offer", sdp: "valid-sdp", unexpected: markers[6] },
+        },
+        error: { type: "error", code: "invalid_signal" },
+      },
+    ];
+
+    for (const { sender, receiver, message, error } of rejectedMessages) {
+      const response = nextJson(sender);
+      const peerStaysQuiet = noMessageFor(receiver);
+      sendJson(sender, message);
+      assert.deepEqual(await response, error);
+      await peerStaysQuiet;
+    }
+
+    const binaryResponse = nextJson(peer);
+    const hostStaysQuiet = noMessageFor(host);
+    peer.send(Buffer.from(markers[7]));
+    assert.deepEqual(await binaryResponse, { type: "error", code: "text_frames_only" });
+    await hostStaysQuiet;
+
+    const signalingSource = await readFile(
+      new URL("../src/lib/signaling.ts", import.meta.url),
+      "utf8",
+    );
+    const imports = [...signalingSource.matchAll(/from\s+["']([^"']+)["']/g)].map(
+      (match) => match[1],
+    );
+    assert.equal(
+      imports.some((specifier) =>
+        /(?:@workspace\/db|drizzle|pino|(?:^|\/)(?:db|database|storage|logger)(?:\/|$)|^node:fs(?:\/|$))/i.test(
+          specifier,
+        ),
+      ),
+      false,
+      "signaling must not import persistence or logging modules",
+    );
+    assert.doesNotMatch(
+      signalingSource,
+      /\b(?:writeFile|appendFile|createWriteStream)\s*\(/,
+      "signaling must not write payloads to persistent files",
+    );
+    assert.doesNotMatch(signalingSource, /\b(?:logger|console)\.(?:debug|info|log|warn|error)\s*\(/);
+    assert.doesNotMatch(signalingSource, /\bprocess\.(?:stdout|stderr)\b/);
+
+    for (const marker of markers) {
+      assert.equal(captured.lines.join("\n").includes(marker), false, `${marker} was written to a console log`);
+    }
+  } finally {
+    await gateway.close();
+    captured.restore();
+  }
+});
+
+test("oversized SDP, ICE candidates, and WebSocket frames are rejected", async () => {
+  const gateway = await startGateway({
+    sessionTtlMs: 5_000,
+    cleanupIntervalMs: 10_000,
+    handshakeTimeoutMs: 2_000,
+  });
+
+  try {
+    const { host, peer, roomId } = await createJoinedPair(gateway);
+    const oversizedSignals = [
+      { type: "offer", sdp: "s".repeat(12_001) },
+      { type: "ice", candidate: "c".repeat(4_001) },
+    ];
+
+    for (const signal of oversizedSignals) {
+      const rejection = nextJson(host);
+      const peerStaysQuiet = noMessageFor(peer);
+      sendJson(host, { action: "signal", roomId, signal });
+      assert.deepEqual(await rejection, { type: "error", code: "invalid_signal" });
+      await peerStaysQuiet;
+    }
+
+    const oversizedFrame = await gateway.connect();
+    const oversizedFrameClose = nextClose(oversizedFrame);
+    oversizedFrame.send("x".repeat(16 * 1024 + 1));
+    const close = await oversizedFrameClose;
+    assert.equal(close.code, 1009);
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("a signaling socket is closed after exceeding the message-rate limit", async () => {
+  const captured = captureConsole();
+  const gateway = await startGateway({ handshakeTimeoutMs: 5_000, cleanupIntervalMs: 10_000 });
+  const marker = "private-rate-limit-payload-marker";
+
+  try {
+    const socket = await gateway.connect();
+    const close = nextClose(socket);
+    for (let index = 0; index < 41; index += 1) {
+      sendJson(socket, { action: "unsupported", marker });
+    }
+
+    assert.deepEqual(await close, { code: 4005, reason: "message rate exceeded" });
+    assert.equal(captured.lines.join("\n").includes(marker), false);
   } finally {
     await gateway.close();
     captured.restore();

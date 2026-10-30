@@ -14,6 +14,7 @@ type SignalingGatewayOptions = {
   cleanupIntervalMs?: number;
   handshakeTimeoutMs?: number;
   maxSessions?: number;
+  maxConnectionsPerIpPerMinute?: number;
 };
 
 type OfferSignal = { type: "offer" | "answer"; sdp: string };
@@ -60,7 +61,10 @@ function getRemoteKey(request: IncomingMessage) {
   return request.socket.remoteAddress ?? "unknown";
 }
 
-function isRateLimited(remoteKey: string) {
+function isRateLimited(
+  remoteKey: string,
+  maxConnectionsPerIpPerMinute = MAX_CONNECTIONS_PER_IP_PER_MINUTE,
+) {
   const now = Date.now();
   const window = connectionWindows.get(remoteKey);
   if (!window || now - window.startedAt >= 60_000) {
@@ -68,7 +72,7 @@ function isRateLimited(remoteKey: string) {
     return false;
   }
   window.count += 1;
-  return window.count > MAX_CONNECTIONS_PER_IP_PER_MINUTE;
+  return window.count > maxConnectionsPerIpPerMinute;
 }
 
 function parseSignal(value: unknown): Signal | null {
@@ -246,6 +250,8 @@ export function attachSignalingGateway(
     cleanupIntervalMs: options.cleanupIntervalMs ?? CLEANUP_INTERVAL_MS,
     handshakeTimeoutMs: options.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS,
     maxSessions: options.maxSessions ?? MAX_SESSIONS,
+    maxConnectionsPerIpPerMinute:
+      options.maxConnectionsPerIpPerMinute ?? MAX_CONNECTIONS_PER_IP_PER_MINUTE,
   };
   const cleanupTimer = setInterval(() => {
     const now = Date.now();
@@ -268,7 +274,7 @@ export function attachSignalingGateway(
       return;
     }
     if (pathname !== SIGNAL_PATH) return;
-    if (isRateLimited(getRemoteKey(request))) {
+    if (isRateLimited(getRemoteKey(request), resolvedOptions.maxConnectionsPerIpPerMinute)) {
       socket.destroy();
       return;
     }
