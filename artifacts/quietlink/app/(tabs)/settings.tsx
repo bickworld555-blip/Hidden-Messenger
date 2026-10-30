@@ -2,6 +2,7 @@ import React from 'react';
 import { Alert, Linking, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, Vibration, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { getListPushDevicesQueryKey, useListPushDevices, useRevokePushDevice } from '@workspace/api-client-react';
 import { Avatar } from '@/components/Avatar';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { SoundPreviewButton } from '@/components/SoundPreviewButton';
@@ -13,6 +14,7 @@ import { getDevicePermission, requestDevicePermission, type DevicePermissionName
 import {
   disableRemotePushNotifications,
   enableRemotePushNotifications,
+  getLocalPushDeviceId,
   scheduleLocalNotificationTest,
   sendRemotePushTest,
 } from '@/services/quietLinkNotifications';
@@ -137,6 +139,26 @@ export default function SettingsScreen() {
   const { storageStatus, storageError, messagingStatus, resetEncryptedVault } = useMessages();
   const { session, signOut } = useAuth();
   const { settings, updateSettings } = useAppSettings();
+  const pushDevicesQuery = useListPushDevices({
+    query: {
+      enabled: Boolean(session?.accountId),
+      queryKey: [...getListPushDevicesQueryKey(), session?.accountId ?? 'signed-out'],
+    },
+  });
+  const revokePushDeviceMutation = useRevokePushDevice();
+  const [localPushDeviceId, setLocalPushDeviceId] = React.useState<string | null>(null);
+  const [revokingDeviceId, setRevokingDeviceId] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    let active = true;
+    if (!session?.accountId) {
+      setLocalPushDeviceId(null);
+      return () => { active = false; };
+    }
+    void getLocalPushDeviceId().then((deviceId) => {
+      if (active) setLocalPushDeviceId(deviceId);
+    });
+    return () => { active = false; };
+  }, [session?.accountId]);
   const explainNotReady = (feature: string) => Alert.alert(feature, 'This feature is not connected in the prototype. Messages are never sent to a messaging network.');
   const handleLocalNotifications = async (enabled: boolean) => {
     if (!enabled) {
@@ -159,6 +181,8 @@ export default function SettingsScreen() {
     if (!enabled) {
       const revoked = await disableRemotePushNotifications();
       await updateSettings({ pushNotificationsEnabled: false });
+      setLocalPushDeviceId(await getLocalPushDeviceId());
+      void pushDevicesQuery.refetch();
       if (!revoked) {
         Alert.alert('Push token revoke pending', 'Remote alerts are off on this device. The server will retry token revocation when this device is online again.');
       }
@@ -167,6 +191,8 @@ export default function SettingsScreen() {
     const result = await enableRemotePushNotifications();
     if (result.ok) {
       await updateSettings({ pushNotificationsEnabled: true });
+      setLocalPushDeviceId(await getLocalPushDeviceId());
+      void pushDevicesQuery.refetch();
       return;
     }
     const message = {
@@ -177,6 +203,47 @@ export default function SettingsScreen() {
       'registration-failed': 'The push token could not be registered. Check your connection and try again.',
     }[result.reason];
     Alert.alert('Remote alerts not enabled', message);
+  };
+  const confirmRevokePushDevice = (deviceId: string) => {
+    const isCurrentDevice = deviceId === localPushDeviceId;
+    Alert.alert(
+      isCurrentDevice ? 'Turn off alerts on this device?' : 'Revoke this device?',
+      isCurrentDevice
+        ? 'Remote alerts will be turned off here. Other registered devices will remain active.'
+        : 'This device will stop receiving remote alerts. Your other registered devices will remain active.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Revoke alerts',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setRevokingDeviceId(deviceId);
+              try {
+                if (isCurrentDevice) {
+                  const revoked = await disableRemotePushNotifications();
+                  await updateSettings({ pushNotificationsEnabled: false });
+                  setLocalPushDeviceId(await getLocalPushDeviceId());
+                  if (!revoked) {
+                    Alert.alert(
+                      'Revocation pending',
+                      'Alerts are disabled on this device, but the server has not confirmed removal. Try again while online.',
+                    );
+                  }
+                } else {
+                  await revokePushDeviceMutation.mutateAsync({ deviceId });
+                }
+                await pushDevicesQuery.refetch();
+              } catch {
+                Alert.alert('Device not revoked', 'The server could not remove this device right now. Check your connection and try again.');
+              } finally {
+                setRevokingDeviceId(null);
+              }
+            })();
+          },
+        },
+      ],
+    );
   };
   const previewVibration = (pattern: VibrationPattern) => {
     if (Platform.OS === 'web' || pattern === 'off') return;
@@ -322,6 +389,49 @@ export default function SettingsScreen() {
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
           <SettingRow icon="send" title="Test remote alert" detail="Send a generic push to this account" onPress={() => void previewRemoteNotification()} />
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
+          <SettingRow
+            icon="smartphone"
+            title="Registered devices"
+            detail={pushDevicesQuery.isLoading
+              ? 'Checking registered devices'
+              : pushDevicesQuery.isError
+                ? 'Unavailable · tap to retry'
+                : `${pushDevicesQuery.data?.devices.length ?? 0} device${pushDevicesQuery.data?.devices.length === 1 ? '' : 's'} · tap to revoke`}
+            onPress={() => void pushDevicesQuery.refetch()}
+            trailing={<Feather name="refresh-cw" size={16} color={colors.mutedForeground} />}
+          />
+          {pushDevicesQuery.isError ? (
+            <Text style={[styles.deviceState, { color: colors.mutedForeground }]}>
+              Registered devices could not be loaded. Tap the row above to retry.
+            </Text>
+          ) : pushDevicesQuery.data?.devices.length ? (
+            pushDevicesQuery.data.devices.map((device) => {
+              const isCurrentDevice = device.deviceId === localPushDeviceId;
+              const expiry = Date.parse(device.expiresAt);
+              const expiryLabel = Number.isFinite(expiry)
+                ? `Alerts expire ${new Date(expiry).toLocaleDateString()}`
+                : 'Alert expiry unavailable';
+              return (
+                <React.Fragment key={device.deviceId}>
+                  <View style={[styles.separator, { backgroundColor: colors.border }]} />
+                  <SettingRow
+                    icon="smartphone"
+                    title={isCurrentDevice ? 'This device' : `Device · ${device.deviceId.slice(-6).toUpperCase()}`}
+                    detail={revokingDeviceId === device.deviceId ? 'Removing remote alerts…' : expiryLabel}
+                    onPress={() => {
+                      if (!revokingDeviceId) confirmRevokePushDevice(device.deviceId);
+                    }}
+                    trailing={<Feather name={revokingDeviceId === device.deviceId ? 'loader' : 'x-circle'} size={17} color={colors.mutedForeground} />}
+                  />
+                </React.Fragment>
+              );
+            })
+          ) : pushDevicesQuery.isLoading ? (
+            <Text style={[styles.deviceState, { color: colors.mutedForeground }]}>Loading registered devices…</Text>
+          ) : (
+            <Text style={[styles.deviceState, { color: colors.mutedForeground }]}>No remote-alert devices are registered.</Text>
+          )}
+          <View style={[styles.separator, { backgroundColor: colors.border }]} />
           <SettingRow icon="bell" title="Test local alert" detail="Schedule a generic device notification" onPress={() => void previewLocalNotification()} />
           <View style={[styles.separator, { backgroundColor: colors.border }]} />
           <PermissionRow name="camera" title="Camera" detail="Needed for a future video-call connection" icon="camera" />
@@ -394,6 +504,7 @@ const styles = StyleSheet.create({
   settingCopy: { flex: 1 },
   settingTitle: { fontSize: 13, fontWeight: '600' },
   settingDetail: { fontSize: 10.5, marginTop: 3 },
+  deviceState: { paddingHorizontal: 58, paddingVertical: 12, fontSize: 10.5, lineHeight: 15 },
   separator: { height: StyleSheet.hairlineWidth, marginLeft: 58 },
   disclosure: { padding: 13, borderRadius: 14, flexDirection: 'row', alignItems: 'flex-start', gap: 9 },
   disclosureText: { flex: 1, fontSize: 10.5, lineHeight: 16 },

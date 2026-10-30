@@ -13,5 +13,8 @@ export * from './healthStatus';
 export * from './otpRequest';
 export * from './otpRequestAccepted';
 export * from './otpVerification';
+export * from './pushDevice';
+export * from './pushDeviceList';
+export * from './pushDeviceRegistration';
 export * from './pushTestAccepted';
 export * from './pushTokenInput';

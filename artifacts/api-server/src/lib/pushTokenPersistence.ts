@@ -12,6 +12,11 @@ export type StoredPushTokenRegistration = Pick<
   "tokenFingerprint" | "encryptedToken"
 >;
 
+export type StoredPushDeviceRegistration = Pick<
+  PushTokenRegistration,
+  "tokenFingerprint" | "expiresAt"
+>;
+
 export type PushTokenLimits = {
   maxTokensPerAccount: number;
   maxAccounts: number;
@@ -27,6 +32,10 @@ export interface PushTokenPersistence {
     limits: PushTokenLimits,
   ): Promise<boolean>;
   listActive(accountId: string, now: number): Promise<StoredPushTokenRegistration[]>;
+  listDeviceRegistrations(
+    accountId: string,
+    now: number,
+  ): Promise<StoredPushDeviceRegistration[]>;
   remove(accountId: string, tokenFingerprint: string): Promise<void>;
 }
 
@@ -148,6 +157,23 @@ export class PostgresPushTokenPersistence implements PushTokenPersistence {
     return result.rows.map((row) => ({
       tokenFingerprint: row.token_fingerprint,
       encryptedToken: row.encrypted_token,
+    }));
+  }
+
+  async listDeviceRegistrations(accountId: string, now: number) {
+    const result = await pool.query<{
+      token_fingerprint: string;
+      expires_at: Date;
+    }>(
+      `SELECT token_fingerprint, expires_at
+       FROM push_device_registrations
+       WHERE account_id = $1 AND expires_at > $2
+       ORDER BY expires_at DESC`,
+      [accountId, new Date(now)],
+    );
+    return result.rows.map((row) => ({
+      tokenFingerprint: row.token_fingerprint,
+      expiresAt: row.expires_at.getTime(),
     }));
   }
 

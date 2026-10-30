@@ -56,6 +56,12 @@ function createMemoryPersistence() {
         .filter((registration) => registration.accountId === accountId)
         .map(({ tokenFingerprint, encryptedToken }) => ({ tokenFingerprint, encryptedToken }));
     },
+    async listDeviceRegistrations(accountId, now) {
+      await persistence.pruneExpired(now);
+      return [...records.values()]
+        .filter((registration) => registration.accountId === accountId)
+        .map(({ tokenFingerprint, expiresAt }) => ({ tokenFingerprint, expiresAt }));
+    },
     async remove(accountId, tokenFingerprint) {
       if (records.get(tokenFingerprint)?.accountId === accountId) {
         records.delete(tokenFingerprint);
@@ -594,6 +600,55 @@ test("tampered encrypted tokens are discarded without a provider send", async ()
   });
   assert.deepEqual(result, { acceptedCount: 0, tokenCount: 0 });
   assert.equal(persistence.records.size, 0);
+});
+
+test("users can revoke one opaque push device without affecting sibling devices", async () => {
+  const persistence = createMemoryPersistence();
+  const service = createPushNotificationService(persistence);
+  const accountId = account("device-management");
+  const otherAccount = account("different-account");
+  const revokedToken = token("managed-device-one");
+  const retainedToken = token("managed-device-two");
+
+  await service.registerExpoPushToken(accountId, revokedToken, Date.now() + 60_000);
+  await service.registerExpoPushToken(accountId, retainedToken, Date.now() + 60_000);
+  const devices = await service.listRegisteredPushDevices(accountId);
+  assert.equal(devices.length, 2);
+  assert.equal(devices.every((device) => /^[A-Za-z0-9_-]{43}$/.test(device.deviceId)), true);
+  assert.equal(devices.every((device) => Number.isFinite(Date.parse(device.expiresAt))), true);
+  assert.equal(devices.every((device) => !("token" in device)), true);
+  assert.equal(JSON.stringify(devices).includes(revokedToken), false);
+  assert.equal(JSON.stringify(devices).includes(retainedToken), false);
+
+  const revokedDeviceId = await service.getPushDeviceIdForToken(accountId, revokedToken);
+  const retainedDeviceId = await service.getPushDeviceIdForToken(accountId, retainedToken);
+  assert.equal(devices.some((device) => device.deviceId === revokedDeviceId), true);
+  assert.equal(await service.revokePushDevice(otherAccount, revokedDeviceId), false);
+  assert.equal((await service.listRegisteredPushDevices(accountId)).length, 2);
+  assert.equal(await service.revokePushDevice(accountId, revokedDeviceId), true);
+
+  const remainingDevices = await service.listRegisteredPushDevices(accountId);
+  assert.equal(remainingDevices.length, 1);
+  assert.equal(remainingDevices[0].deviceId === retainedDeviceId, true);
+
+  let deliveredOnlyToRetainedDevice = false;
+  const result = await service.sendGenericPushNotification({
+    accountId,
+    type: "test",
+    routeId: "f47ac10b58cc4372a5670e02b2c3d479",
+  }, async (_url, init) => {
+    const messages = JSON.parse(init.body);
+    deliveredOnlyToRetainedDevice =
+      messages.length === 1 && messages[0].to === retainedToken;
+    return new Response(JSON.stringify({ data: [{ status: "ok" }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+
+  assert.deepEqual(result, { acceptedCount: 1, tokenCount: 1 });
+  assert.equal(deliveredOnlyToRetainedDevice, true);
+  assert.equal(await service.revokePushDevice(accountId, revokedDeviceId), false);
 });
 
 test("device registration limits are preserved", async () => {

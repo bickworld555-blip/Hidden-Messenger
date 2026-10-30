@@ -150,10 +150,26 @@ paths:
             schema:
               $ref: "#/components/schemas/PushTokenInput"
       responses:
-        "204":
-          description: Push token registered
+        "200":
+          description: Push token registered with an opaque device identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushDeviceRegistration"
         "400":
           description: Invalid Expo push token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+        "429":
+          description: Registered device limit reached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+        "503":
+          description: Push registration is temporarily unavailable
           content:
             application/json:
               schema:
@@ -188,6 +204,73 @@ paths:
                 $ref: "#/components/schemas/AuthError"
         "401":
           description: Session is missing or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+  /auth/push-devices:
+    get:
+      operationId: listPushDevices
+      tags: [notifications]
+      summary: List opaque push device identifiers for the authenticated account
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Registered devices with expiry only; push tokens are never returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushDeviceList"
+        "401":
+          description: Session is missing or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+        "503":
+          description: Push registry is temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+  /auth/push-devices/{deviceId}:
+    delete:
+      operationId: revokePushDevice
+      tags: [notifications]
+      summary: Revoke one registered push device for the authenticated account
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{43}$"
+      responses:
+        "204":
+          description: Device revoked
+        "400":
+          description: Invalid opaque device identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+        "401":
+          description: Session is missing or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+        "404":
+          description: Device is not registered to this account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+        "503":
+          description: Push registry is temporarily unavailable
           content:
             application/json:
               schema:
@@ -303,6 +386,34 @@ components:
           maxLength: 256
           pattern: "^(Expo|Exponent)PushToken\\[[A-Za-z0-9_-]{20,240}\\]$"
       required: [token]
+    PushDeviceRegistration:
+      type: object
+      additionalProperties: false
+      properties:
+        deviceId:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{43}$"
+      required: [deviceId]
+    PushDevice:
+      type: object
+      additionalProperties: false
+      properties:
+        deviceId:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{43}$"
+        expiresAt:
+          type: string
+          format: date-time
+      required: [deviceId, expiresAt]
+    PushDeviceList:
+      type: object
+      additionalProperties: false
+      properties:
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/PushDevice"
+      required: [devices]
     PushTestAccepted:
       type: object
       properties:

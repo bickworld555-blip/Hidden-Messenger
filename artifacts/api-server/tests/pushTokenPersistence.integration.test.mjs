@@ -149,3 +149,61 @@ test("cleanup for an old account leaves its rebound database registration active
     await service.revokeExpoPushToken(secondAccount, pushToken);
   }
 });
+
+test("an opaque device id revokes only its own persistent registration", {
+  skip: !enabled,
+}, async () => {
+  assert.ok(process.env.SESSION_SECRET, "SESSION_SECRET must be configured");
+  const persistence = new PostgresPushTokenPersistence();
+  const accountId = derivePushAccountId(
+    `88019${process.pid}${Date.now()}`,
+    process.env.SESSION_SECRET,
+  );
+  const revokedToken = `ExponentPushToken[managed-revoke-a-${process.pid}-${Date.now()}]`;
+  const retainedToken = `ExponentPushToken[managed-revoke-b-${process.pid}-${Date.now()}]`;
+  const service = createPushNotificationService(persistence);
+
+  try {
+    assert.equal(
+      await service.registerExpoPushToken(accountId, revokedToken, Date.now() + 60_000),
+      true,
+    );
+    assert.equal(
+      await service.registerExpoPushToken(accountId, retainedToken, Date.now() + 60_000),
+      true,
+    );
+    const devices = await service.listRegisteredPushDevices(accountId);
+    assert.equal(devices.length, 2);
+    assert.equal(JSON.stringify(devices).includes(revokedToken), false);
+    assert.equal(JSON.stringify(devices).includes(retainedToken), false);
+
+    const revokedDeviceId = await service.getPushDeviceIdForToken(accountId, revokedToken);
+    const retainedDeviceId = await service.getPushDeviceIdForToken(accountId, retainedToken);
+    assert.equal(await service.revokePushDevice(accountId, revokedDeviceId), true);
+
+    const remainingDevices = await service.listRegisteredPushDevices(accountId);
+    assert.equal(remainingDevices.length, 1);
+    assert.equal(remainingDevices[0].deviceId === retainedDeviceId, true);
+
+    let deliveredOnlyToRetainedDevice = false;
+    const result = await service.sendGenericPushNotification({
+      accountId,
+      type: "test",
+      routeId: "f47ac10b58cc4372a5670e02b2c3d479",
+    }, async (_url, init) => {
+      const messages = JSON.parse(init.body);
+      deliveredOnlyToRetainedDevice =
+        messages.length === 1 && messages[0].to === retainedToken;
+      return new Response(JSON.stringify({ data: [{ status: "ok" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    assert.deepEqual(result, { acceptedCount: 1, tokenCount: 1 });
+    assert.equal(deliveredOnlyToRetainedDevice, true);
+  } finally {
+    await service.revokeExpoPushToken(accountId, revokedToken);
+    await service.revokeExpoPushToken(accountId, retainedToken);
+  }
+});

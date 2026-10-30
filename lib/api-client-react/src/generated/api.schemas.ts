@@ -53,6 +53,21 @@ export interface PushTokenInput {
   token: string;
 }
 
+export interface PushDeviceRegistration {
+  /** @pattern ^[A-Za-z0-9_-]{43}$ */
+  deviceId: string;
+}
+
+export interface PushDevice {
+  /** @pattern ^[A-Za-z0-9_-]{43}$ */
+  deviceId: string;
+  expiresAt: string;
+}
+
+export interface PushDeviceList {
+  devices: PushDevice[];
+}
+
 export interface PushTestAccepted {
   /** @minimum 0 */
   acceptedCount: number;

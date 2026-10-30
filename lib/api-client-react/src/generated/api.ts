@@ -27,6 +27,8 @@ import type {
   OtpRequest,
   OtpRequestAccepted,
   OtpVerification,
+  PushDeviceList,
+  PushDeviceRegistration,
   PushTestAccepted,
   PushTokenInput
 } from './api.schemas';
@@ -474,7 +476,7 @@ export const getRegisterPushTokenUrl = () => {
 /**
  * @summary Register an Expo push token for the authenticated device
  */
-export const registerPushToken = async (pushTokenInput: PushTokenInput, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+export const registerPushToken = async (pushTokenInput: PushTokenInput, options?: Parameters<typeof customFetch>[1]): Promise<PushDeviceRegistration> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -490,7 +492,7 @@ export const registerPushToken = async (pushTokenInput: PushTokenInput, options?
     }
     return headers;
   };
-return customFetch<void>(getRegisterPushTokenUrl(),
+return customFetch<PushDeviceRegistration>(getRegisterPushTokenUrl(),
   {
     ...options,
     method: 'POST',
@@ -637,6 +639,157 @@ export const useRevokePushToken = <TError = ErrorType<AuthError>,
         TContext
       > => {
       return useMutation(getRevokePushTokenMutationOptions(options));
+    }
+
+export const getListPushDevicesUrl = () => {
+
+
+
+
+  return `/api/auth/push-devices`
+}
+
+/**
+ * @summary List opaque push device identifiers for the authenticated account
+ */
+export const listPushDevices = async ( options?: Parameters<typeof customFetch>[1]): Promise<PushDeviceList> => {
+
+  return customFetch<PushDeviceList>(getListPushDevicesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListPushDevicesQueryKey = () => {
+    return [
+    `/api/auth/push-devices`
+    ] as const;
+    }
+
+
+export const getListPushDevicesQueryOptions = <TData = Awaited<ReturnType<typeof listPushDevices>>, TError = ErrorType<AuthError>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPushDevices>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPushDevicesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPushDevices>>> = ({ signal }) => listPushDevices({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPushDevices>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListPushDevicesQueryResult = NonNullable<Awaited<ReturnType<typeof listPushDevices>>>
+export type ListPushDevicesQueryError = ErrorType<AuthError>
+
+
+/**
+ * @summary List opaque push device identifiers for the authenticated account
+ */
+
+export function useListPushDevices<TData = Awaited<ReturnType<typeof listPushDevices>>, TError = ErrorType<AuthError>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPushDevices>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListPushDevicesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getRevokePushDeviceUrl = (deviceId: string,) => {
+
+
+
+
+  return `/api/auth/push-devices/${deviceId}`
+}
+
+/**
+ * @summary Revoke one registered push device for the authenticated account
+ */
+export const revokePushDevice = async (deviceId: string, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getRevokePushDeviceUrl(deviceId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getRevokePushDeviceMutationKey = () => ['revokePushDevice'] as const;
+
+export const getRevokePushDeviceMutationOptions = <TError = ErrorType<AuthError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokePushDevice>>, TError,RevokePushDeviceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof revokePushDevice>>, TError,RevokePushDeviceMutationVariables, TContext> => {
+
+const mutationKey = getRevokePushDeviceMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof revokePushDevice>>, RevokePushDeviceMutationVariables> = (props) => {
+          const {deviceId} = props ?? {};
+
+          return  revokePushDevice(deviceId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RevokePushDeviceMutationResult = NonNullable<Awaited<ReturnType<typeof revokePushDevice>>>
+
+    export type RevokePushDeviceMutationError = ErrorType<AuthError>
+    export type RevokePushDeviceMutationVariables = {deviceId: string}
+
+    /**
+ * @summary Revoke one registered push device for the authenticated account
+ */
+export const useRevokePushDevice = <TError = ErrorType<AuthError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokePushDevice>>, TError,RevokePushDeviceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof revokePushDevice>>,
+        TError,
+        RevokePushDeviceMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRevokePushDeviceMutationOptions(options));
     }
 
 export const getSendPushTestUrl = () => {

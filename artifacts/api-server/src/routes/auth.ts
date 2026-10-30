@@ -5,7 +5,11 @@ import {
   allowPushTest,
   derivePushAccountId,
   isExpoPushToken,
+  isOpaquePushDeviceId,
+  getPushDeviceIdForToken,
+  listRegisteredPushDevices,
   registerExpoPushToken,
+  revokePushDevice,
   revokeExpoPushToken,
   sendGenericPushNotification,
 } from "../lib/pushNotifications";
@@ -341,9 +345,63 @@ router.post("/auth/push-token", async (req, res) => {
       sendError(res, 429, "PUSH_DEVICE_LIMIT", "This account has reached its registered device limit.");
       return;
     }
-    res.status(204).end();
+    const deviceId = await getPushDeviceIdForToken(accountId, token);
+    if (!deviceId) {
+      sendError(res, 503, "PUSH_REGISTRY_UNAVAILABLE", "Remote alert registration is temporarily unavailable.");
+      return;
+    }
+    res.status(200).json({ deviceId });
   } catch {
     sendError(res, 503, "PUSH_REGISTRY_UNAVAILABLE", "Remote alert registration is temporarily unavailable.");
+  }
+});
+
+router.get("/auth/push-devices", async (req, res) => {
+  const authenticated = getSessionFromRequest(req);
+  if (!authenticated) {
+    sendError(res, 401, "UNAUTHENTICATED", "Sign in again to continue.");
+    return;
+  }
+  const sessionSecret = process.env["SESSION_SECRET"];
+  if (!sessionSecret) {
+    sendError(res, 503, "AUTH_NOT_CONFIGURED", "Phone verification is not configured on the server.");
+    return;
+  }
+  const accountId = derivePushAccountId(authenticated.session.phone, sessionSecret);
+  try {
+    const devices = await listRegisteredPushDevices(accountId);
+    res.status(200).json({ devices });
+  } catch {
+    sendError(res, 503, "PUSH_REGISTRY_UNAVAILABLE", "Registered devices are temporarily unavailable.");
+  }
+});
+
+router.delete("/auth/push-devices/:deviceId", async (req, res) => {
+  const authenticated = getSessionFromRequest(req);
+  if (!authenticated) {
+    sendError(res, 401, "UNAUTHENTICATED", "Sign in again to continue.");
+    return;
+  }
+  const deviceId = req.params["deviceId"];
+  if (!isOpaquePushDeviceId(deviceId)) {
+    sendError(res, 400, "INVALID_PUSH_DEVICE_ID", "The device identifier is invalid.");
+    return;
+  }
+  const sessionSecret = process.env["SESSION_SECRET"];
+  if (!sessionSecret) {
+    sendError(res, 503, "AUTH_NOT_CONFIGURED", "Phone verification is not configured on the server.");
+    return;
+  }
+  const accountId = derivePushAccountId(authenticated.session.phone, sessionSecret);
+  try {
+    const revoked = await revokePushDevice(accountId, deviceId);
+    if (!revoked) {
+      sendError(res, 404, "PUSH_DEVICE_NOT_FOUND", "This device is not registered to the account.");
+      return;
+    }
+    res.status(204).end();
+  } catch {
+    sendError(res, 503, "PUSH_REGISTRY_UNAVAILABLE", "Device revocation is temporarily unavailable.");
   }
 });
 

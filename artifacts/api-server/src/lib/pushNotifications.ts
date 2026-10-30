@@ -26,7 +26,7 @@ type PushMessage = {
   ttl: number;
 };
 type ReceiptRef = { accountId: string; tokenFingerprint: string; ticketId: string };
-type PushTokenKeys = { encryption: Buffer; fingerprint: Buffer };
+type PushTokenKeys = { encryption: Buffer; fingerprint: Buffer; deviceId: Buffer };
 type PushNotificationServiceOptions = {
   retrySleep?: (milliseconds: number) => Promise<void>;
   receiptCheckDelayMs?: number;
@@ -38,6 +38,7 @@ const TOKEN_TAG_BYTES = 16;
 const TOKEN_KEY_SALT = Buffer.from("Hidden Messenger push token registry v1");
 
 const accountIdPattern = /^[A-Za-z0-9_-]{43}$/;
+const pushDeviceIdPattern = /^[A-Za-z0-9_-]{43}$/;
 const pushTokenPattern = /^(?:Expo|Exponent)PushToken\[[A-Za-z0-9_-]{20,240}\]$/;
 const routeIdPattern = /^(?:[A-Fa-f0-9]{32}|[a-f0-9-]{36}|[A-Za-z0-9_-]{22,128})$/;
 
@@ -50,6 +51,10 @@ export function derivePushAccountId(phone: string, secret: string) {
 
 export function isExpoPushToken(token: unknown): token is string {
   return typeof token === "string" && token.length <= 256 && pushTokenPattern.test(token);
+}
+
+export function isOpaquePushDeviceId(value: unknown): value is string {
+  return typeof value === "string" && pushDeviceIdPattern.test(value);
 }
 
 export function isOpaquePushRouteId(value: unknown): value is string {
@@ -66,16 +71,30 @@ function derivePushTokenKeys(): PushTokenKeys {
     fingerprint: Buffer.from(
       hkdfSync("sha256", masterSecret, TOKEN_KEY_SALT, "token-fingerprint", 32),
     ),
+    deviceId: Buffer.from(
+      hkdfSync("sha256", masterSecret, TOKEN_KEY_SALT, "push-device-id-v1", 32),
+    ),
   };
 }
 
 function clearPushTokenKeys(keys: PushTokenKeys) {
   keys.encryption.fill(0);
   keys.fingerprint.fill(0);
+  keys.deviceId.fill(0);
 }
 
 function fingerprintPushToken(token: string, key: Buffer) {
   return createHmac("sha256", key).update(token).digest("hex");
+}
+
+function deriveOpaquePushDeviceId(
+  accountId: string,
+  tokenFingerprint: string,
+  key: Buffer,
+) {
+  return createHmac("sha256", key)
+    .update(`Hidden Messenger push device id v1\0${accountId}\0${tokenFingerprint}`)
+    .digest("base64url");
 }
 
 function pushTokenAad(accountId: string, tokenFingerprint: string) {
@@ -219,6 +238,46 @@ export function createPushNotificationService(
           maxTokensPerAccount: MAX_TOKENS_PER_ACCOUNT,
           maxAccounts: MAX_ACCOUNTS,
         });
+      } finally {
+        clearPushTokenKeys(keys);
+      }
+    },
+
+    async getPushDeviceIdForToken(accountId: string, token: string) {
+      if (!accountIdPattern.test(accountId) || !isExpoPushToken(token)) return null;
+      const keys = derivePushTokenKeys();
+      try {
+        const tokenFingerprint = fingerprintPushToken(token, keys.fingerprint);
+        return deriveOpaquePushDeviceId(accountId, tokenFingerprint, keys.deviceId);
+      } finally {
+        clearPushTokenKeys(keys);
+      }
+    },
+
+    async listRegisteredPushDevices(accountId: string, now = Date.now()) {
+      if (!accountIdPattern.test(accountId)) return [];
+      const registrations = await persistence.listDeviceRegistrations(accountId, now);
+      const keys = derivePushTokenKeys();
+      try {
+        return registrations.map(({ tokenFingerprint, expiresAt }) => ({
+          deviceId: deriveOpaquePushDeviceId(accountId, tokenFingerprint, keys.deviceId),
+          expiresAt: new Date(expiresAt).toISOString(),
+        }));
+      } finally {
+        clearPushTokenKeys(keys);
+      }
+    },
+
+    async revokePushDevice(accountId: string, deviceId: string, now = Date.now()) {
+      if (!accountIdPattern.test(accountId) || !isOpaquePushDeviceId(deviceId)) return false;
+      const registrations = await persistence.listDeviceRegistrations(accountId, now);
+      const keys = derivePushTokenKeys();
+      try {
+        const match = registrations.find(({ tokenFingerprint }) =>
+          deriveOpaquePushDeviceId(accountId, tokenFingerprint, keys.deviceId) === deviceId);
+        if (!match) return false;
+        await persistence.remove(accountId, match.tokenFingerprint);
+        return true;
       } finally {
         clearPushTokenKeys(keys);
       }
@@ -379,6 +438,18 @@ export async function allowPushTest(accountId: string) {
 
 export async function registerExpoPushToken(accountId: string, token: string, expiresAt: number) {
   return (await getPersistentPushService()).registerExpoPushToken(accountId, token, expiresAt);
+}
+
+export async function getPushDeviceIdForToken(accountId: string, token: string) {
+  return (await getPersistentPushService()).getPushDeviceIdForToken(accountId, token);
+}
+
+export async function listRegisteredPushDevices(accountId: string) {
+  return (await getPersistentPushService()).listRegisteredPushDevices(accountId);
+}
+
+export async function revokePushDevice(accountId: string, deviceId: string) {
+  return (await getPersistentPushService()).revokePushDevice(accountId, deviceId);
 }
 
 export async function revokeExpoPushToken(accountId: string, token: string) {

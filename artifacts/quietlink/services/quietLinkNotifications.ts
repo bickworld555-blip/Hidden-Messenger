@@ -10,6 +10,7 @@ import {
 let localNotificationsEnabled = false;
 let remotePushEnabled = false;
 const PUSH_TOKEN_KEY = 'hidden-messenger.push-token.v1';
+const PUSH_DEVICE_ID_KEY = 'hidden-messenger.push-device-id.v1';
 const secureStoreOptions: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
 };
@@ -84,11 +85,18 @@ export async function enableRemotePushNotifications(): Promise<PushSetupResult> 
 
     const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
     const previousToken = await SecureStore.getItemAsync(PUSH_TOKEN_KEY, secureStoreOptions);
-    await registerPushToken({ token });
+    const registration = await registerPushToken({ token });
+    if (!/^[A-Za-z0-9_-]{43}$/.test(registration.deviceId)) {
+      await revokePushToken({ token }).catch(() => undefined);
+      return { ok: false, reason: 'registration-failed' };
+    }
     try {
       await SecureStore.setItemAsync(PUSH_TOKEN_KEY, token, secureStoreOptions);
+      await SecureStore.setItemAsync(PUSH_DEVICE_ID_KEY, registration.deviceId, secureStoreOptions);
     } catch {
       await revokePushToken({ token }).catch(() => undefined);
+      await SecureStore.deleteItemAsync(PUSH_TOKEN_KEY, secureStoreOptions).catch(() => undefined);
+      await SecureStore.deleteItemAsync(PUSH_DEVICE_ID_KEY, secureStoreOptions).catch(() => undefined);
       return { ok: false, reason: 'registration-failed' };
     }
     if (previousToken && previousToken !== token) {
@@ -104,12 +112,14 @@ export async function enableRemotePushNotifications(): Promise<PushSetupResult> 
 export async function disableRemotePushNotifications() {
   const token = await SecureStore.getItemAsync(PUSH_TOKEN_KEY, secureStoreOptions).catch(() => null);
   if (!token) {
+    await SecureStore.deleteItemAsync(PUSH_DEVICE_ID_KEY, secureStoreOptions).catch(() => undefined);
     remotePushEnabled = false;
     return true;
   }
   try {
     await revokePushToken({ token });
     await SecureStore.deleteItemAsync(PUSH_TOKEN_KEY, secureStoreOptions);
+    await SecureStore.deleteItemAsync(PUSH_DEVICE_ID_KEY, secureStoreOptions);
     remotePushEnabled = false;
     return true;
   } catch {
@@ -117,6 +127,10 @@ export async function disableRemotePushNotifications() {
     remotePushEnabled = false;
     return false;
   }
+}
+
+export async function getLocalPushDeviceId() {
+  return SecureStore.getItemAsync(PUSH_DEVICE_ID_KEY, secureStoreOptions).catch(() => null);
 }
 
 export async function sendRemotePushTest() {

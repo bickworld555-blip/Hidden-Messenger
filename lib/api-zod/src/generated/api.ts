@@ -94,7 +94,12 @@ export const RegisterPushTokenBody = zod.object({
   "token": zod.string().min(registerPushTokenBodyTokenMin).max(registerPushTokenBodyTokenMax).regex(registerPushTokenBodyTokenRegExp)
 })
 
-export const RegisterPushTokenResponse = zod.void()
+export const registerPushTokenResponseDeviceIdRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+
+
+export const RegisterPushTokenResponse = zod.object({
+  "deviceId": zod.string().regex(registerPushTokenResponseDeviceIdRegExp)
+})
 
 
 /**
@@ -112,6 +117,33 @@ export const RevokePushTokenBody = zod.object({
 })
 
 export const RevokePushTokenResponse = zod.void()
+
+
+/**
+ * @summary List opaque push device identifiers for the authenticated account
+ */
+export const listPushDevicesResponseDevicesItemDeviceIdRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+
+
+export const ListPushDevicesResponse = zod.object({
+  "devices": zod.array(zod.object({
+  "deviceId": zod.string().regex(listPushDevicesResponseDevicesItemDeviceIdRegExp),
+  "expiresAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary Revoke one registered push device for the authenticated account
+ */
+export const revokePushDevicePathDeviceIdRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+
+
+export const RevokePushDeviceParams = zod.object({
+  "deviceId": zod.coerce.string().regex(revokePushDevicePathDeviceIdRegExp)
+})
+
+export const RevokePushDeviceResponse = zod.void()
 
 
 /**
