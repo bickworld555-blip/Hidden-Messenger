@@ -16,7 +16,10 @@
       }
     },
     "android": {
-      "package": "com.hiddenmessenger.app"
+      "package": "com.hiddenmessenger.app",
+      "blockedPermissions": [
+        "android.permission.WRITE_CONTACTS"
+      ]
     },
     "web": {
       "favicon": "./assets/images/icon.png",
@@ -93,6 +96,12 @@
           "photosPermission": "Hidden Messenger accesses selected photos and videos only when you choose an attachment.",
           "cameraPermission": "Hidden Messenger requests camera access only when you choose a camera feature.",
           "microphonePermission": false
+        }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Hidden Messenger reads contact names and phone numbers on this device only to show your contacts and prepare invitations."
         }
       ],
       [

@@ -22,6 +22,7 @@ const MEDIA_PICKER_TYPES = {
   image: 'image/*',
   video: 'video/*',
   audio: 'audio/*',
+  file: '*/*',
 } as const;
 
 export type LocalMediaKind = keyof typeof MEDIA_PICKER_TYPES;
@@ -120,11 +121,12 @@ export async function pickAndEncryptLocalMedia(
   if (!asset?.uri) throw new Error('The system picker did not provide a readable media file.');
 
   const mimeType = (asset.mimeType ?? '').toLowerCase();
-  if (
-    !mimeType.startsWith(`${kind}/`) ||
-    !/^(image|video|audio)\/[a-z0-9.+-]+$/.test(mimeType)
-  ) {
-    throw new Error('The selected file does not have a supported image, video, or audio type.');
+  const validMimeType = /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(mimeType);
+  const matchesKind = kind === 'file'
+    ? validMimeType
+    : mimeType.startsWith(`${kind}/`) && /^(image|video|audio)\/[a-z0-9.+-]+$/.test(mimeType);
+  if (!validMimeType || !matchesKind) {
+    throw new Error('The selected item does not have a valid supported media or file type.');
   }
 
   const id = (await import('expo-crypto')).randomUUID();

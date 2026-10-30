@@ -80,7 +80,7 @@ function LockedVoiceNotePanel({
   const colors = useColors();
   const reason = storageReady
     ? 'This build does not include the native encrypted audio path.'
-    : 'The encrypted SQLCipher vault is unavailable.';
+    : 'This runtime does not expose the native SQLCipher vault.';
 
   return (
     <View style={[styles.panel, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -90,7 +90,7 @@ function LockedVoiceNotePanel({
         </View>
         <View style={{ flex: 1 }}>
           <Text style={[styles.title, { color: colors.foreground }]}>Voice notes</Text>
-          <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>Recording unavailable</Text>
+          <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>Native encrypted recording required</Text>
         </View>
         <Text style={[styles.duration, { color: colors.mutedForeground }]}>00:00</Text>
         <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close voice note panel">
@@ -121,7 +121,7 @@ function LockedVoiceNotePanel({
         <Text style={[styles.locked, { color: colors.mutedForeground }]}>Locked</Text>
       </View>
       <Text style={[styles.disclosure, { color: colors.mutedForeground }]}>
-        {reason} Voice controls stay disabled instead of saving an unencrypted audio file. Local recordings will not be sent or shared until a reviewed E2EE protocol is selected.
+        {reason} Recording stays disabled instead of saving an unencrypted audio file. This voice-note path is local-only; sending remains locked until a reviewed E2EE protocol is selected.
       </Text>
       <Pressable onPress={() => void onCheckMicrophone()} style={styles.permissionLink} accessibilityRole="button">
         <Feather name="mic" size={13} color={colors.primary} />

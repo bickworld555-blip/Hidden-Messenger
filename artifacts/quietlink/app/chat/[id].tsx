@@ -162,8 +162,8 @@ export default function ChatScreen() {
         <Text style={[styles.prototypeText, { color: colors.accentForeground }]}>
           {messagingStatus === 'locked'
             ? storageStatus === 'encrypted'
-              ? 'Text messages stay on this device · QR-verified WebRTC calls are separate'
-              : 'Text messages are unavailable · local media requires native SQLCipher'
+              ? 'Sending locked · E2EE protocol review pending'
+              : 'Sending locked · native encrypted storage required'
             : 'Secure messaging enabled'}
         </Text>
       </View>
@@ -185,6 +185,7 @@ export default function ChatScreen() {
             { icon: 'image' as const, label: 'Photo', kind: 'image' as const },
             { icon: 'video' as const, label: 'Video', kind: 'video' as const },
             { icon: 'headphones' as const, label: 'Audio', kind: 'audio' as const },
+            { icon: 'file' as const, label: 'File', kind: 'file' as const },
           ].map((item) => (
             <Pressable
               key={item.label}
@@ -216,18 +217,18 @@ export default function ChatScreen() {
         <TextInput
           value={draft}
           onChangeText={setDraft}
-          placeholder={messagingStatus === 'locked' ? 'Text messaging unavailable' : 'Message'}
+          placeholder={messagingStatus === 'locked' ? 'Write a draft · sending locked' : 'Message'}
           placeholderTextColor={colors.mutedForeground}
           style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]}
           multiline
           maxLength={2000}
-          editable={messagingStatus === 'ready'}
+          editable
           accessibilityLabel="Message"
           onFocus={() => setAttachmentOpen(false)}
         />
         {draft.trim() ? (
-          <Pressable onPress={onSend} disabled={messagingStatus !== 'ready'} style={[styles.sendButton, { backgroundColor: messagingStatus === 'ready' ? colors.primary : colors.muted }]} accessibilityLabel="Send message">
-            <Feather name="arrow-up" size={19} color={colors.primaryForeground} />
+          <Pressable onPress={onSend} disabled={messagingStatus !== 'ready'} style={[styles.sendButton, { backgroundColor: messagingStatus === 'ready' ? colors.primary : colors.muted }]} accessibilityLabel={messagingStatus === 'ready' ? 'Send message' : 'Sending locked until E2EE review'}>
+            <Feather name={messagingStatus === 'ready' ? 'arrow-up' : 'lock'} size={17} color={colors.primaryForeground} />
           </Pressable>
         ) : (
           <Pressable onPress={() => { setVoicePanelOpen((value) => !value); setAttachmentOpen(false); }} style={styles.composerIcon} disabled={mediaBusy} accessibilityLabel="Open voice note controls">
