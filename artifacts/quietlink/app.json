@@ -15,6 +15,9 @@
         "CFBundleDisplayName": "Hidden Messenger"
       }
     },
+    "android": {
+      "package": "com.hiddenmessenger.app"
+    },
     "web": {
       "favicon": "./assets/images/icon.png",
       "output": "static",
@@ -60,10 +63,7 @@
           "configureAndroidBackup": true
         }
       ],
-      [
-        "react-native-libsodium",
-        {}
-      ],
+      ["react-native-libsodium", {}],
       [
         "expo-audio",
         {

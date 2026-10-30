@@ -13,6 +13,10 @@ Hidden Messenger is a cross-platform private-messaging prototype. Its visible ap
 
 Expo's `name` is set to **Hidden Messenger** and supplies the Android application label during native generation. `ios.infoPlist.CFBundleDisplayName` explicitly sets the iOS home-screen name. This repository uses Expo prebuild configuration and does not check in `ios/Info.plist` or `android/app/src/main/AndroidManifest.xml`.
 
+## Android test APK
+
+The GitHub Actions workflow **Android test APK** is started manually from the repository's **Actions** tab with **Run workflow**. It generates the Android native project from the Expo config, builds `assembleDebug`, and uploads the installable APK as a workflow artifact for 14 days. The APK is signed with Android's debug key for device testing; it is not a release-signed build and must not be distributed as a production release.
+
 ## Security status
 
 - Native builds must include SQLCipher; storage fails closed when it is unavailable.
