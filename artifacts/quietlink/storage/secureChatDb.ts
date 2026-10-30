@@ -407,6 +407,12 @@ export async function listLocalVoiceNotes(conversationId: string) {
   );
 }
 
+export async function listAllLocalVoiceNoteIds() {
+  const db = await openSecureChatDatabase();
+  const rows = await db.getAllAsync<{ id: string }>('SELECT id FROM voice_notes');
+  return rows.map((row) => row.id);
+}
+
 export async function deleteLocalVoiceNote(id: string) {
   const db = await openSecureChatDatabase();
   await db.runAsync('DELETE FROM voice_notes WHERE id = ?', id);

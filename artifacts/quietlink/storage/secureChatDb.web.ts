@@ -79,6 +79,10 @@ export async function listLocalVoiceNotes(): Promise<never[]> {
   throw unavailable();
 }
 
+export async function listAllLocalVoiceNoteIds(): Promise<never[]> {
+  throw unavailable();
+}
+
 export async function deleteLocalVoiceNote(): Promise<never> {
   throw unavailable();
 }

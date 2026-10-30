@@ -12,6 +12,7 @@ import {
   destroyLocalVault,
 } from '@/storage/secureChatDb';
 import { isSecureMessagingReady, sendEncryptedText } from '@/security/secureMessaging';
+import { cleanupOrphanedVoiceNoteFiles } from '@/storage/secureVoiceNotes';
 
 export type ChatMessage = {
   id: string;
@@ -84,6 +85,11 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     const hydrate = async () => {
       try {
         await openSecureChatDatabase();
+        try {
+          await cleanupOrphanedVoiceNoteFiles();
+        } catch {
+          // Reconciliation is best-effort; a cleanup failure must not downgrade an open encrypted vault.
+        }
         let storedThreads = await listLocalConversations();
         if (storedThreads.length === 0 && await shouldSeedDemoContent()) {
           const seedTime = Date.now();

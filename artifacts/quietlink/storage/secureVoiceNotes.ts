@@ -5,11 +5,16 @@ import { Platform } from 'react-native';
 import {
   deleteLocalVoiceNote,
   getLocalVoiceNote,
+  listAllLocalVoiceNoteIds,
   listLocalVoiceNotes,
   openSecureChatDatabase,
   saveLocalVoiceNote,
   type LocalVoiceNoteSummary,
 } from '@/storage/secureChatDb';
+import {
+  removeOrphanedVoiceNoteFiles,
+  type VoiceNoteOrphanCleanupResult,
+} from '@/storage/voiceNoteOrphanCleanup';
 import { readExactly } from '@/storage/secureMediaBuffers';
 import {
   readAuthenticatedVoiceFrames,
@@ -25,6 +30,8 @@ const CHANNELS = 1;
 const MAX_VOICE_NOTE_BYTES = 10 * 1024 * 1024;
 const NONCE_LENGTH = 12;
 const TAG_LENGTH = 16;
+const activeVoiceNoteIds = new Set<string>();
+let voiceNoteCleanupPromise: Promise<VoiceNoteOrphanCleanupResult> | null = null;
 
 type FileHandle = ReturnType<File['open']>;
 
@@ -47,6 +54,43 @@ type ExpoAudioModule = {
 
 function getVoiceDirectory() {
   return new Directory(Paths.document, VOICE_DIRECTORY_NAME);
+}
+
+/**
+ * Removes orphaned ciphertext after the SQLCipher vault and voice-note rows
+ * are readable. File deletion is best effort and is not flash-level erasure.
+ */
+export function cleanupOrphanedVoiceNoteFiles(): Promise<VoiceNoteOrphanCleanupResult> {
+  if (Platform.OS !== 'ios' && Platform.OS !== 'android') {
+    return Promise.resolve({ examined: 0, preserved: 0, removed: 0, failed: 0 });
+  }
+
+  if (!voiceNoteCleanupPromise) {
+    voiceNoteCleanupPromise = removeOrphanedVoiceNoteFiles({
+      openEncryptedVault: openSecureChatDatabase,
+      listVoiceNoteIds: listAllLocalVoiceNoteIds,
+      activeVoiceNoteIds,
+      listDirectoryFiles: async () => {
+        const directory = getVoiceDirectory();
+        if (!directory.exists) return [];
+        return directory.list()
+          .filter((entry): entry is File => entry instanceof File)
+          .map((file) => ({
+            name: file.name,
+            get exists() {
+              return file.exists;
+            },
+            delete() {
+              file.delete();
+            },
+          }));
+      },
+    }).catch((error: unknown) => {
+      voiceNoteCleanupPromise = null;
+      throw error;
+    });
+  }
+  return voiceNoteCleanupPromise;
 }
 
 function bytesToAscii(value: string) {
@@ -175,6 +219,7 @@ export async function beginLocalVoiceNote(
     outputFile = new File(directory, `${id}.hmvn`);
     outputFile.create({ intermediates: true, overwrite: false });
     createdFile = true;
+    activeVoiceNoteIds.add(id.toLowerCase());
     outputHandle = outputFile.open(FileMode.WriteOnly);
     await outputHandle.writeBytes(VOICE_HEADER);
   } catch {
@@ -182,6 +227,7 @@ export async function beginLocalVoiceNote(
     if (createdFile && outputFile?.exists) {
       try { outputFile.delete(); } catch { /* no sensitive content was written */ }
     }
+    activeVoiceNoteIds.delete(id.toLowerCase());
     key = null;
     throw new Error('Could not initialize encrypted voice-note storage.');
   }
@@ -198,6 +244,7 @@ export async function beginLocalVoiceNote(
     }
     key = null;
     fileKeyHex = '';
+    activeVoiceNoteIds.delete(id.toLowerCase());
   };
 
   return {
@@ -300,6 +347,7 @@ export async function beginLocalVoiceNote(
         state = 'finished';
         key = null;
         fileKeyHex = '';
+        activeVoiceNoteIds.delete(id.toLowerCase());
         return {
           id,
           conversation_id: conversationId,
