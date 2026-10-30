@@ -80,11 +80,16 @@ async function startGateway(options) {
 
   const address = server.address();
   assert.ok(address && typeof address === "object");
+  const createClientSocket = () => {
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/api/signal`);
+    clients.push(socket);
+    return socket;
+  };
 
   return {
+    createSocket: createClientSocket,
     async connect() {
-      const socket = new WebSocket(`ws://127.0.0.1:${address.port}/api/signal`);
-      clients.push(socket);
+      const socket = createClientSocket();
       await withTimeout(once(socket, "open"), "Timed out opening WebSocket");
       return socket;
     },
@@ -139,6 +144,61 @@ async function waitUntilExpired(expiresAt) {
   }
   await new Promise((resolve) => setTimeout(resolve, 5));
 }
+
+test("per-IP connection bursts are rejected without disrupting allowed callers", async () => {
+  const maxConnections = 3;
+  const gateway = await startGateway({
+    maxConnectionsPerIpPerMinute: maxConnections,
+    handshakeTimeoutMs: 5_000,
+    cleanupIntervalMs: 10_000,
+  });
+
+  try {
+    const host = await gateway.connect();
+    const peer = await gateway.connect();
+    const remainingAllowedSocket = await gateway.connect();
+    const rejectedSocket = gateway.createSocket();
+    rejectedSocket.on("error", () => {});
+    const rejectedClose = new Promise((resolve) => rejectedSocket.once("close", resolve));
+    const connectionResult = withTimeout(new Promise((resolve) => {
+      const cleanup = () => {
+        rejectedSocket.off("open", onOpen);
+        rejectedSocket.off("error", onReject);
+        rejectedSocket.off("close", onReject);
+      };
+      const onOpen = () => {
+        cleanup();
+        resolve("opened");
+      };
+      const onReject = () => {
+        cleanup();
+        resolve("rejected");
+      };
+      rejectedSocket.once("open", onOpen);
+      rejectedSocket.once("error", onReject);
+      rejectedSocket.once("close", onReject);
+    }), "Timed out waiting for the over-limit connection to be rejected");
+
+    assert.equal(await connectionResult, "rejected");
+    await withTimeout(rejectedClose, "The rejected socket did not close");
+
+    const pairing = await createPairing(gateway, host);
+    const hostPeerJoined = nextJson(host);
+    const peerJoined = nextJson(peer);
+    sendJson(peer, {
+      action: "join",
+      roomId: pairing.roomId,
+      joinToken: pairing.joinToken,
+    });
+    assert.equal((await peerJoined).type, "joined");
+    assert.deepEqual(await hostPeerJoined, { type: "peer-joined" });
+    assert.equal(remainingAllowedSocket.readyState, WebSocket.OPEN);
+    assert.equal(host.readyState, WebSocket.OPEN);
+    assert.equal(peer.readyState, WebSocket.OPEN);
+  } finally {
+    await gateway.close();
+  }
+});
 
 test("joining requires the token, can happen once, and does not log token or SDP", async () => {
   const captured = captureConsole();
