@@ -200,6 +200,55 @@ test("per-IP connection bursts are rejected without disrupting allowed callers",
   }
 });
 
+test("a valid signal cannot be relayed with another pairing's room ID", async () => {
+  const gateway = await startGateway({ handshakeTimeoutMs: 5_000, cleanupIntervalMs: 10_000 });
+
+  try {
+    const senderPair = await createJoinedPair(gateway);
+    const otherPair = await createJoinedPair(gateway);
+    const recipients = [senderPair.peer, otherPair.host, otherPair.peer];
+    const mismatchedSignals = [
+      { type: "offer", sdp: "v=0\r\n" },
+      {
+        type: "ice",
+        candidate: "candidate:1 1 udp 1 192.0.2.1 12345 typ host",
+        sdpMid: "0",
+        sdpMLineIndex: 0,
+      },
+    ];
+
+    for (const signal of mismatchedSignals) {
+      const senderError = nextJson(senderPair.host);
+      const recipientsStayQuiet = Promise.all(recipients.map((socket) => noMessageFor(socket, 100)));
+      sendJson(senderPair.host, {
+        action: "signal",
+        roomId: otherPair.roomId,
+        signal,
+      });
+      assert.deepEqual(await senderError, { type: "error", code: "unsupported_message" });
+      await recipientsStayQuiet;
+    }
+
+    const validSignal = { type: "offer", sdp: "v=0\r\n" };
+    const intendedPeerReceives = nextJson(senderPair.peer);
+    const otherPairStaysQuiet = Promise.all([otherPair.host, otherPair.peer].map((socket) => noMessageFor(socket, 100)));
+    sendJson(senderPair.host, {
+      action: "signal",
+      roomId: senderPair.roomId,
+      signal: validSignal,
+    });
+    assert.deepEqual(await intendedPeerReceives, { type: "signal", signal: validSignal });
+    await otherPairStaysQuiet;
+
+    assert.equal(senderPair.host.readyState, WebSocket.OPEN);
+    assert.equal(senderPair.peer.readyState, WebSocket.OPEN);
+    assert.equal(otherPair.host.readyState, WebSocket.OPEN);
+    assert.equal(otherPair.peer.readyState, WebSocket.OPEN);
+  } finally {
+    await gateway.close();
+  }
+});
+
 test("joining requires the token, can happen once, and does not log token or SDP", async () => {
   const captured = captureConsole();
   const gateway = await startGateway({ sessionTtlMs: 5_000, cleanupIntervalMs: 10_000, maxSessions: 1 });
