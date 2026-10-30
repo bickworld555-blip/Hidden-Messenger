@@ -7,6 +7,14 @@ const SESSION_TTL_MS = 2 * 60 * 1000;
 const HANDSHAKE_TIMEOUT_MS = 10 * 1000;
 const MAX_SESSIONS = 250;
 const MAX_CONNECTIONS_PER_IP_PER_MINUTE = 20;
+const CLEANUP_INTERVAL_MS = 30_000;
+
+type SignalingGatewayOptions = {
+  sessionTtlMs?: number;
+  cleanupIntervalMs?: number;
+  handshakeTimeoutMs?: number;
+  maxSessions?: number;
+};
 
 type OfferSignal = { type: "offer" | "answer"; sdp: string };
 type IceSignal = {
@@ -45,6 +53,7 @@ function closeRoom(room: Room, reason: string, except?: WebSocket) {
     send(peer, { type: "session-closed", reason });
     peer.close(4001, reason.slice(0, 100));
   }
+  room.peers.clear();
 }
 
 function getRemoteKey(request: IncomingMessage) {
@@ -85,12 +94,18 @@ function parseSignal(value: unknown): Signal | null {
   return null;
 }
 
-function bindSocket(socket: WebSocket) {
+function bindSocket(
+  socket: WebSocket,
+  options: Required<SignalingGatewayOptions>,
+) {
   let room: Room | undefined;
   let authenticated = false;
   let messageWindowStartedAt = Date.now();
   let messageCount = 0;
-  const handshakeTimer = setTimeout(() => socket.close(4002, "handshake timeout"), HANDSHAKE_TIMEOUT_MS);
+  const handshakeTimer = setTimeout(
+    () => socket.close(4002, "handshake timeout"),
+    options.handshakeTimeoutMs,
+  );
 
   socket.on("message", (raw, isBinary) => {
     const now = Date.now();
@@ -124,7 +139,7 @@ function bindSocket(socket: WebSocket) {
 
     if (!authenticated) {
       if (value.action === "create" && Object.keys(value).length === 1) {
-        if (rooms.size >= MAX_SESSIONS) {
+        if (rooms.size >= options.maxSessions) {
           socket.close(4003, "signaling capacity reached");
           return;
         }
@@ -134,7 +149,7 @@ function bindSocket(socket: WebSocket) {
           id,
           joinTokenHash: createHash("sha256").update(joinToken).digest(),
           peers: new Set([socket]),
-          expiresAt: Date.now() + SESSION_TTL_MS,
+          expiresAt: Date.now() + options.sessionTtlMs,
         };
         rooms.set(id, room);
         roomBySocket.set(socket, room);
@@ -146,12 +161,16 @@ function bindSocket(socket: WebSocket) {
 
       if (value.action === "join" && typeof value.roomId === "string" && typeof value.joinToken === "string") {
         const candidateRoom = rooms.get(value.roomId);
-        if (
-          !candidateRoom ||
-          candidateRoom.expiresAt <= Date.now() ||
-          candidateRoom.peers.size !== 1 ||
-          !/^[A-Za-z0-9_-]{43}$/.test(value.joinToken)
-        ) {
+        if (!candidateRoom) {
+          socket.close(4004, "invalid or expired pairing");
+          return;
+        }
+        if (candidateRoom.expiresAt <= Date.now()) {
+          closeRoom(candidateRoom, "pairing expired");
+          socket.close(4004, "invalid or expired pairing");
+          return;
+        }
+        if (candidateRoom.peers.size !== 1 || !/^[A-Za-z0-9_-]{43}$/.test(value.joinToken)) {
           socket.close(4004, "invalid or expired pairing");
           return;
         }
@@ -213,23 +232,33 @@ function bindSocket(socket: WebSocket) {
   });
 }
 
-const cleanupTimer = setInterval(() => {
-  const now = Date.now();
-  for (const room of rooms.values()) {
-    if (room.expiresAt <= now) closeRoom(room, "pairing expired");
-  }
-  for (const [key, window] of connectionWindows) {
-    if (now - window.startedAt >= 60_000) connectionWindows.delete(key);
-  }
-}, 30_000);
-cleanupTimer.unref();
-
 /**
  * Attaches a memory-only WebSocket signaling gateway to the API HTTP server.
  * The gateway accepts ephemeral pairing and WebRTC offer/answer/ICE messages,
  * and rejects chat text, media frames, and unrecognized payload shapes.
  */
-export function attachSignalingGateway(server: Server) {
+export function attachSignalingGateway(
+  server: Server,
+  options: SignalingGatewayOptions = {},
+) {
+  const resolvedOptions: Required<SignalingGatewayOptions> = {
+    sessionTtlMs: options.sessionTtlMs ?? SESSION_TTL_MS,
+    cleanupIntervalMs: options.cleanupIntervalMs ?? CLEANUP_INTERVAL_MS,
+    handshakeTimeoutMs: options.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS,
+    maxSessions: options.maxSessions ?? MAX_SESSIONS,
+  };
+  const cleanupTimer = setInterval(() => {
+    const now = Date.now();
+    for (const room of rooms.values()) {
+      if (room.expiresAt <= now) closeRoom(room, "pairing expired");
+    }
+    for (const [key, window] of connectionWindows) {
+      if (now - window.startedAt >= 60_000) connectionWindows.delete(key);
+    }
+  }, resolvedOptions.cleanupIntervalMs);
+  cleanupTimer.unref();
+  server.once("close", () => clearInterval(cleanupTimer));
+
   server.on("upgrade", (request, socket, head) => {
     let pathname: string;
     try {
@@ -245,7 +274,7 @@ export function attachSignalingGateway(server: Server) {
     }
     socketServer.handleUpgrade(request, socket, head, (webSocket) => {
       socketServer.emit("connection", webSocket, request);
-      bindSocket(webSocket);
+      bindSocket(webSocket, resolvedOptions);
     });
   });
 }
