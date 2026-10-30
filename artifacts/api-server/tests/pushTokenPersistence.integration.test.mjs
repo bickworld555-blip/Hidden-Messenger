@@ -94,3 +94,58 @@ test("self-test cooldowns survive restarts, expire, and admit only one concurren
   ]);
   assert.deepEqual([firstClaim, secondClaim].sort(), [false, true]);
 });
+
+test("cleanup for an old account leaves its rebound database registration active", {
+  skip: !enabled,
+}, async () => {
+  assert.ok(process.env.SESSION_SECRET, "SESSION_SECRET must be configured");
+  const persistence = new PostgresPushTokenPersistence();
+  const firstAccount = derivePushAccountId(
+    `88017${process.pid}${Date.now()}`,
+    process.env.SESSION_SECRET,
+  );
+  const secondAccount = derivePushAccountId(
+    `88018${process.pid}${Date.now()}`,
+    process.env.SESSION_SECRET,
+  );
+  const pushToken = `ExponentPushToken[rebind-integration-${process.pid}-${Date.now()}]`;
+  const service = createPushNotificationService(persistence);
+
+  try {
+    assert.equal(
+      await service.registerExpoPushToken(firstAccount, pushToken, Date.now() + 60_000),
+      true,
+    );
+    const oldRegistration = await persistence.listActive(firstAccount, Date.now());
+    assert.equal(oldRegistration.length, 1);
+
+    assert.equal(
+      await service.registerExpoPushToken(secondAccount, pushToken, Date.now() + 60_000),
+      true,
+    );
+    await persistence.remove(firstAccount, oldRegistration[0].tokenFingerprint);
+
+    const reboundRegistration = await persistence.listActive(secondAccount, Date.now());
+    assert.equal(reboundRegistration.length, 1);
+    let deliveredToReboundDevice = false;
+    const result = await service.sendGenericPushNotification({
+      accountId: secondAccount,
+      type: "test",
+      routeId: "f47ac10b58cc4372a5670e02b2c3d479",
+    }, async (_url, init) => {
+      const messages = JSON.parse(init.body);
+      deliveredToReboundDevice =
+        messages.length === 1 && messages[0].to === pushToken;
+      return new Response(JSON.stringify({ data: [{ status: "ok" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    assert.deepEqual(result, { acceptedCount: 1, tokenCount: 1 });
+    assert.equal(deliveredToReboundDevice, true);
+  } finally {
+    await service.revokeExpoPushToken(firstAccount, pushToken);
+    await service.revokeExpoPushToken(secondAccount, pushToken);
+  }
+});

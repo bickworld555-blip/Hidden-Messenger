@@ -425,6 +425,80 @@ test("delayed receipts remove only the matching failed device", async () => {
   assert.deepEqual(nextResult, { acceptedCount: 1, tokenCount: 1 });
 });
 
+test("an old account receipt cannot remove a device rebound to another account", async () => {
+  const persistence = createMemoryPersistence();
+  const service = createPushNotificationService(persistence, {
+    receiptCheckDelayMs: 0,
+    retrySleep: async () => {},
+  });
+  const oldAccount = account("old-receipt-owner");
+  const newAccount = account("new-receipt-owner");
+  const pushToken = token("rebound-device");
+  let resolveCleanupAttempt;
+  const cleanupAttempted = new Promise((resolve) => {
+    resolveCleanupAttempt = resolve;
+  });
+  const remove = persistence.remove;
+  persistence.remove = async (accountId, fingerprint) => {
+    await remove(accountId, fingerprint);
+    if (accountId === oldAccount) resolveCleanupAttempt();
+  };
+
+  await service.registerExpoPushToken(oldAccount, pushToken, Date.now() + 60_000);
+  const oldAccountResult = await service.sendGenericPushNotification({
+    accountId: oldAccount,
+    type: "test",
+    routeId: "f47ac10b58cc4372a5670e02b2c3d479",
+  }, async (url) => {
+    if (url.endsWith("/push/send")) {
+      return makeFetchResponse({ status: "ok", id: "old-account-ticket" });
+    }
+    return new Response(JSON.stringify({
+      data: {
+        "old-account-ticket": {
+          status: "error",
+          details: { error: "DeviceNotRegistered" },
+        },
+      },
+    }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+
+  await service.registerExpoPushToken(newAccount, pushToken, Date.now() + 60_000);
+  assert.deepEqual(oldAccountResult, { acceptedCount: 1, tokenCount: 1 });
+  await Promise.race([
+    cleanupAttempted,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("receipt cleanup timed out")), 1_000)),
+  ]);
+
+  assert.equal(persistence.records.size, 1);
+  assert.equal([...persistence.records.values()][0].accountId === newAccount, true);
+
+  let deliveredToReboundDevice = false;
+  const newAccountResult = await service.sendGenericPushNotification({
+    accountId: newAccount,
+    type: "test",
+    routeId: "f47ac10b58cc4372a5670e02b2c3d479",
+  }, async (_url, init) => {
+    const messages = JSON.parse(init.body);
+    deliveredToReboundDevice =
+      messages.length === 1 && messages[0].to === pushToken;
+    return makeFetchResponse({ status: "ok" });
+  });
+
+  assert.deepEqual(newAccountResult, { acceptedCount: 1, tokenCount: 1 });
+  assert.equal(deliveredToReboundDevice, true);
+  assert.deepEqual(await service.sendGenericPushNotification({
+    accountId: oldAccount,
+    type: "test",
+    routeId: "f47ac10b58cc4372a5670e02b2c3d479",
+  }, async () => {
+    assert.fail("The previous account must no longer receive this device's alerts");
+  }), { acceptedCount: 0, tokenCount: 0 });
+});
+
 test("429 provider responses retry twice with bounded deterministic delays", async () => {
   const persistence = createMemoryPersistence();
   const accountId = account("retry-429");
