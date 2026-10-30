@@ -243,9 +243,10 @@ test("an expired pairing rejects a late join and frees room capacity", async () 
   }
 });
 
-test("periodic expiry closes both connected peers and removes the room", async () => {
+test("a paired call survives invitation expiry and ends at its active-call limit", async () => {
   const gateway = await startGateway({
-    sessionTtlMs: 200,
+    sessionTtlMs: 100,
+    activeCallTtlMs: 1_000,
     cleanupIntervalMs: 10,
     handshakeTimeoutMs: 1_000,
     maxSessions: 1,
@@ -261,15 +262,31 @@ test("periodic expiry closes both connected peers and removes the room", async (
     await peerJoined;
     await hostPeerJoined;
 
+    await waitUntilExpired(pairing.expiresAt);
+    assert.equal(host.readyState, WebSocket.OPEN);
+    assert.equal(peer.readyState, WebSocket.OPEN);
+    const relayedSignal = nextJson(host);
+    sendJson(peer, {
+      action: "signal",
+      roomId: pairing.roomId,
+      signal: { type: "offer", sdp: "active-call-still-relays" },
+    });
+    assert.deepEqual(await relayedSignal, {
+      type: "signal",
+      signal: { type: "offer", sdp: "active-call-still-relays" },
+    });
+
+    const callExpiry = Date.now() + 1_000;
     const hostClosedMessage = nextJson(host);
     const peerClosedMessage = nextJson(peer);
     const hostClose = nextClose(host);
     const peerClose = nextClose(peer);
 
-    assert.deepEqual(await hostClosedMessage, { type: "session-closed", reason: "pairing expired" });
-    assert.deepEqual(await peerClosedMessage, { type: "session-closed", reason: "pairing expired" });
-    assert.deepEqual(await hostClose, { code: 4001, reason: "pairing expired" });
-    assert.deepEqual(await peerClose, { code: 4001, reason: "pairing expired" });
+    await waitUntilExpired(callExpiry);
+    assert.deepEqual(await hostClosedMessage, { type: "session-closed", reason: "call expired" });
+    assert.deepEqual(await peerClosedMessage, { type: "session-closed", reason: "call expired" });
+    assert.deepEqual(await hostClose, { code: 4001, reason: "call expired" });
+    assert.deepEqual(await peerClose, { code: 4001, reason: "call expired" });
 
     const replacementHost = await gateway.connect();
     assert.equal((await createPairing(gateway, replacementHost)).type, "created");

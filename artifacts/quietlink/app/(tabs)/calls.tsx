@@ -1,77 +1,143 @@
-import React from 'react';
-import { FlatList, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useRef, useState } from 'react';
+import {
+  Alert,
+  Linking,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Avatar } from '@/components/Avatar';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { useColors } from '@/hooks/useColors';
-
-const calls = [
-  { id: 'maya', name: 'Maya Chen', initials: 'MC', color: '#D7A68F', kind: 'video' as const, incoming: true, time: 'Today, 8:46' },
-  { id: 'eli', name: 'Eli Morgan', initials: 'EM', color: '#A399C5', kind: 'audio' as const, incoming: false, time: 'Yesterday, 18:12' },
-  { id: 'sam', name: 'Samira Rahman', initials: 'SR', color: '#82A2B3', kind: 'audio' as const, incoming: true, time: 'Monday, 11:03' },
-];
-
-const previewStages = [
-  { label: 'Incoming', stage: 'incoming' as const, mode: 'audio' as const, icon: 'phone-incoming' as const },
-  { label: 'Outgoing', stage: 'outgoing' as const, mode: 'audio' as const, icon: 'phone-outgoing' as const },
-  { label: 'Active layout', stage: 'active' as const, mode: 'video' as const, icon: 'video' as const },
-];
+import { parseCallInvite } from '@/security/secureCallVerification';
 
 export default function CallsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const scanHandled = useRef(false);
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [scanError, setScanError] = useState('');
+
+  const openScanner = async () => {
+    if (Platform.OS === 'web') {
+      setScanError('Join calls by scanning an invitation QR in the rebuilt native iOS or Android app.');
+      return;
+    }
+    const permission = cameraPermission?.granted ? cameraPermission : await requestCameraPermission();
+    if (permission.status !== 'granted') {
+      setScanError('Allow camera access to scan a call invitation.');
+      if (permission.status === 'denied' && !permission.canAskAgain) {
+        Alert.alert('Camera access denied', 'Open device settings to allow QR scanning.', [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Open settings',
+            onPress: () => {
+              if (Platform.OS !== 'web') void Linking.openSettings().catch(() => setScanError('Could not open device settings.'));
+            },
+          },
+        ]);
+      }
+      return;
+    }
+    scanHandled.current = false;
+    setScanError('');
+    setScannerOpen(true);
+  };
+
+  const handleScannedQr = (value: string) => {
+    if (scanHandled.current) return;
+    scanHandled.current = true;
+    const invite = parseCallInvite(value);
+    if (!invite) {
+      setScannerOpen(false);
+      setScanError('This is not a valid or current Hidden Messenger call invitation.');
+      return;
+    }
+    setScannerOpen(false);
+    router.push({
+      pathname: '/call/[id]',
+      params: {
+        id: invite.roomId,
+        name: 'Secure call',
+        mode: invite.mode,
+        role: 'joiner',
+        invite: value,
+      },
+    });
+  };
+
   return (
-    <View style={[styles.screen, { backgroundColor: colors.background, paddingTop: insets.top + (Platform.OS === 'web' ? 67 : 10) }]}>
+    <View style={[
+      styles.screen,
+      {
+        backgroundColor: colors.background,
+        paddingTop: insets.top + (Platform.OS === 'web' ? 67 : 10),
+        paddingBottom: insets.bottom + 86,
+      },
+    ]}>
       <View style={styles.headerWrap}>
-        <ScreenHeader title="Calls" subtitle="Recent voice and video calls" />
-        <View style={[styles.notice, { backgroundColor: colors.accent }]}>
-          <Feather name="info" size={15} color={colors.primary} />
-          <Text style={[styles.noticeText, { color: colors.accentForeground }]}>Call screens and tones are local previews. No call transport is connected.</Text>
-        </View>
-        <View style={[styles.previewCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.previewTitle, { color: colors.foreground }]}>Preview call screens</Text>
-          <View style={styles.previewButtons}>
-            {previewStages.map((item) => (
-              <Pressable
-                key={item.stage}
-                onPress={() => router.push({
-                  pathname: '/call/[id]',
-                  params: { id: 'maya', name: 'Maya Chen', mode: item.mode, stage: item.stage },
-                })}
-                style={({ pressed }) => [styles.previewButton, { backgroundColor: pressed ? colors.accent : colors.secondary }]}
-                accessibilityRole="button"
-                accessibilityLabel={`Open ${item.label.toLowerCase()} call screen preview`}
-              >
-                <Feather name={item.icon} size={14} color={colors.primary} />
-                <Text style={[styles.previewButtonText, { color: colors.secondaryForeground }]}>{item.label}</Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
+        <ScreenHeader title="Calls" subtitle="QR-verified peer-to-peer calls" />
       </View>
-      <FlatList
-        data={calls}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 90, paddingTop: 10 }}
-        renderItem={({ item }) => (
-          <View style={[styles.callRow, { borderBottomColor: colors.border }]}>
-            <Avatar initials={item.initials} color={item.color} size={50} />
-            <View style={styles.callCopy}>
-              <Text style={[styles.name, { color: colors.foreground }]}>{item.name}</Text>
-              <View style={styles.callMeta}>
-                <Feather name={item.incoming ? 'corner-down-left' : 'corner-up-right'} size={13} color={item.incoming ? colors.primary : colors.mutedForeground} />
-                <Text style={[styles.metaText, { color: colors.mutedForeground }]}>{item.time} · {item.kind === 'video' ? 'Video' : 'Voice'}</Text>
-              </View>
-            </View>
-            <Pressable onPress={() => router.push({ pathname: '/call/[id]', params: { id: item.id, name: item.name, mode: item.kind, stage: 'outgoing' } })} hitSlop={12} accessibilityRole="button" accessibilityLabel={`Open call preview for ${item.name}`}>
-              <Feather name={item.kind === 'video' ? 'video' : 'phone'} size={20} color={colors.primary} />
+      {scannerOpen ? (
+        <View style={styles.scanner}>
+          <CameraView
+            style={StyleSheet.absoluteFill}
+            facing="back"
+            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+            onBarcodeScanned={({ data }) => handleScannedQr(data)}
+          />
+          <View style={styles.scannerFooter}>
+            <Text style={styles.scannerTitle}>Scan call invitation</Text>
+            <Text style={styles.scannerCopy}>The short-lived QR contains a one-time pairing token.</Text>
+            <Pressable onPress={() => setScannerOpen(false)} style={styles.closeButton} accessibilityRole="button" accessibilityLabel="Close scanner">
+              <Feather name="x" size={20} color="#FFFFFF" />
             </Pressable>
           </View>
-        )}
-      />
+        </View>
+      ) : (
+        <View style={styles.content}>
+          <View style={[styles.hero, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={[styles.heroIcon, { backgroundColor: colors.accent }]}>
+              <Feather name="shield" size={24} color={colors.primary} />
+            </View>
+            <Text style={[styles.title, { color: colors.foreground }]}>Private calls, verified in person</Text>
+            <Text style={[styles.body, { color: colors.mutedForeground }]}>
+              Start an audio or video call from a chat. The other device scans its temporary invitation, then scans a second QR to confirm the WebRTC fingerprint before media starts.
+            </Text>
+            <View style={[styles.privacyNote, { backgroundColor: colors.accent }]}>
+              <Feather name="lock" size={14} color={colors.primary} />
+              <Text style={[styles.privacyText, { color: colors.accentForeground }]}>
+                Media uses WebRTC DTLS-SRTP. Signaling relays setup data only; it does not carry call audio or video.
+              </Text>
+            </View>
+          </View>
+          <Pressable
+            onPress={() => void openScanner()}
+            style={({ pressed }) => [
+              styles.joinButton,
+              { backgroundColor: pressed ? colors.accent : colors.primary },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Scan a secure call invitation"
+          >
+            <Feather name="camera" size={19} color={colors.primaryForeground} />
+            <Text style={[styles.joinButtonText, { color: colors.primaryForeground }]}>Scan call invitation</Text>
+          </Pressable>
+          {scanError ? <Text style={[styles.error, { color: colors.destructive }]}>{scanError}</Text> : null}
+          {Platform.OS === 'web' ? (
+            <Text style={[styles.webNote, { color: colors.mutedForeground }]}>
+              Web preview cannot access native WebRTC. Use a custom iOS or Android development build.
+            </Text>
+          ) : null}
+        </View>
+      )}
     </View>
   );
 }
@@ -79,16 +145,20 @@ export default function CallsScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   headerWrap: { paddingHorizontal: 20 },
-  notice: { flexDirection: 'row', gap: 9, alignItems: 'center', borderRadius: 12, padding: 12, marginTop: 13 },
-  noticeText: { fontSize: 11.5, flex: 1, lineHeight: 16 },
-  previewCard: { borderWidth: 1, borderRadius: 15, padding: 12, marginTop: 12 },
-  previewTitle: { fontSize: 12, fontWeight: '700', marginBottom: 9 },
-  previewButtons: { flexDirection: 'row', gap: 7 },
-  previewButton: { flex: 1, minHeight: 37, borderRadius: 11, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 7 },
-  previewButtonText: { fontSize: 9, fontWeight: '700' },
-  callRow: { minHeight: 77, flexDirection: 'row', alignItems: 'center', gap: 13, paddingHorizontal: 20, borderBottomWidth: StyleSheet.hairlineWidth },
-  callCopy: { flex: 1, gap: 5 },
-  name: { fontSize: 15, fontWeight: '600' },
-  callMeta: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  metaText: { fontSize: 11.5 },
+  content: { flex: 1, paddingHorizontal: 20, paddingTop: 22, gap: 14 },
+  hero: { borderWidth: 1, borderRadius: 23, padding: 19, gap: 13 },
+  heroIcon: { width: 48, height: 48, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: 19, lineHeight: 25, fontWeight: '700' },
+  body: { fontSize: 13, lineHeight: 19 },
+  privacyNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, padding: 11, borderRadius: 13 },
+  privacyText: { flex: 1, fontSize: 11, lineHeight: 16 },
+  joinButton: { minHeight: 54, borderRadius: 17, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 9 },
+  joinButtonText: { fontSize: 13, fontWeight: '700' },
+  error: { fontSize: 12, lineHeight: 17, textAlign: 'center' },
+  webNote: { fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: 4 },
+  scanner: { flex: 1, margin: 18, overflow: 'hidden', borderRadius: 22 },
+  scannerFooter: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'flex-end', padding: 22, gap: 9, backgroundColor: 'rgba(0,0,0,0.2)' },
+  scannerTitle: { color: '#FFFFFF', fontSize: 19, fontWeight: '700' },
+  scannerCopy: { color: '#FFFFFF', fontSize: 12, lineHeight: 17, textAlign: 'center', maxWidth: 270 },
+  closeButton: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center', borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.55)', marginTop: 5 },
 });

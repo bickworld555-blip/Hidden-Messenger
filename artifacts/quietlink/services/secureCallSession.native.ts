@@ -1,7 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import type {
   MediaStream,
-  RTCDataChannel,
+  MediaStreamTrack,
   RTCPeerConnection,
 } from 'react-native-webrtc';
 import {
@@ -23,6 +23,7 @@ import type {
 } from '@/services/secureCallSession.types';
 
 type JsonRecord = Record<string, unknown>;
+type RTCDataChannel = ReturnType<RTCPeerConnection['createDataChannel']>;
 type IceCandidatePayload = {
   candidate: string;
   sdpMid?: string | null;
@@ -191,6 +192,18 @@ class NativeSecureCallSession implements SecureCallController {
   async end() {
     if (this.isEnded) return;
     this.isEnded = true;
+    this.disposeResources();
+    this.publish({
+      status: 'ended',
+      inviteQr: null,
+      verificationQr: null,
+      verificationCode: null,
+      localStream: null,
+      remoteStream: null,
+    });
+  }
+
+  private disposeResources() {
     for (const waiter of this.waiters) {
       clearTimeout(waiter.timer);
       waiter.reject(new Error('Call ended.'));
@@ -207,14 +220,6 @@ class NativeSecureCallSession implements SecureCallController {
     this.remoteStream?.getTracks().forEach((track) => track.stop());
     this.localStream = null;
     this.remoteStream = null;
-    this.publish({
-      status: 'ended',
-      inviteQr: null,
-      verificationQr: null,
-      verificationCode: null,
-      localStream: null,
-      remoteStream: null,
-    });
   }
 
   private publish(change: Partial<SecureCallSnapshot>) {
@@ -229,20 +234,24 @@ class NativeSecureCallSession implements SecureCallController {
     const socket = new WebSocket(`wss://${domain}/api/signal`);
     this.socket = socket;
     await new Promise<void>((resolve, reject) => {
+      let opened = false;
       const timer = setTimeout(() => {
         socket.close();
         reject(new Error('Could not connect to the secure call signaling service.'));
       }, SIGNAL_TIMEOUT_MS);
       socket.onopen = () => {
+        opened = true;
         clearTimeout(timer);
         resolve();
       };
       socket.onerror = () => {
         clearTimeout(timer);
-        reject(new Error('Could not connect to the secure call signaling service.'));
+        if (opened) this.fail('The secure call signaling connection failed.');
+        else reject(new Error('Could not connect to the secure call signaling service.'));
       };
       socket.onclose = () => {
         clearTimeout(timer);
+        if (!opened) reject(new Error('Could not connect to the secure call signaling service.'));
         if (!this.isEnded) this.fail('The signaling connection closed.');
       };
       socket.onmessage = (event) => this.onSocketMessage(event.data);
@@ -266,17 +275,23 @@ class NativeSecureCallSession implements SecureCallController {
     const peerConnection = new this.webRTC.RTCPeerConnection({ iceServers: ICE_SERVERS });
     this.peerConnection = peerConnection;
     peerConnection.onicecandidate = (event) => {
-      if (!event.candidate || !this.invite) return;
+      const candidate = (event as unknown as { candidate: {
+        candidate: string;
+        sdpMid: string | null;
+        sdpMLineIndex: number | null;
+      } | null }).candidate;
+      if (!candidate || !this.invite) return;
       this.sendSignal({
         type: 'ice',
-        candidate: event.candidate.candidate,
-        sdpMid: event.candidate.sdpMid,
-        sdpMLineIndex: event.candidate.sdpMLineIndex,
+        candidate: candidate.candidate,
+        sdpMid: candidate.sdpMid,
+        sdpMLineIndex: candidate.sdpMLineIndex,
       });
     };
     peerConnection.ontrack = (event) => {
-      const stream = event.streams[0] ?? this.createRemoteStream();
-      if (!event.streams[0] && event.track) stream.addTrack(event.track);
+      const trackEvent = event as unknown as { streams: MediaStream[]; track: MediaStreamTrack | null };
+      const stream = trackEvent.streams[0] ?? this.createRemoteStream();
+      if (!trackEvent.streams[0] && trackEvent.track) stream.addTrack(trackEvent.track);
       this.remoteStream = stream;
       this.publish({ remoteStream: stream });
       this.updateActiveState();
@@ -296,7 +311,10 @@ class NativeSecureCallSession implements SecureCallController {
         peerConnection.createDataChannel('call-verification', { ordered: true }),
       );
     } else {
-      peerConnection.ondatachannel = (event) => this.attachDataChannel(event.channel);
+      peerConnection.ondatachannel = (event) => {
+        const channelEvent = event as unknown as { channel: RTCDataChannel };
+        this.attachDataChannel(channelEvent.channel);
+      };
     }
   }
 
@@ -311,8 +329,9 @@ class NativeSecureCallSession implements SecureCallController {
     channel.onopen = () => {
       void this.refreshVerificationCode();
     };
-    channel.onmessage = (event) => {
-      void this.onDataMessage(String(event.data));
+    channel.onmessage = (event: unknown) => {
+      const data = (event as { data?: unknown }).data;
+      void this.onDataMessage(String(data ?? ''));
     };
     channel.onerror = () => {
       this.fail('The encrypted call control channel failed.');
@@ -420,7 +439,7 @@ class NativeSecureCallSession implements SecureCallController {
     const sdp = this.peerConnection.localDescription?.sdp;
     if (!sdp) throw new Error('Could not create the initial WebRTC offer.');
     this.sendSignal({ type: 'offer', sdp });
-    this.publish({ status: 'connecting' });
+    this.publish({ status: 'connecting', inviteQr: null });
   }
 
   private async handleSignal(signal: SignalPayload) {
@@ -446,6 +465,7 @@ class NativeSecureCallSession implements SecureCallController {
       this.sendSignal({ type: 'answer', sdp: localSdp });
       this.publish({ status: this.isVerified ? 'verified' : 'connecting' });
       await this.refreshVerificationCode();
+      this.updateActiveState();
       return;
     }
 
@@ -518,11 +538,7 @@ class NativeSecureCallSession implements SecureCallController {
     }
     this.mediaRequest = this.webRTC.mediaDevices
       .getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
+        audio: true,
         video: this.mode === 'video'
           ? {
               facingMode: 'user',
@@ -576,9 +592,19 @@ class NativeSecureCallSession implements SecureCallController {
 
   private fail(error: string) {
     if (this.isEnded) return;
-    this.publish({ status: 'error', error, inviteQr: null, verificationQr: null });
-    void this.end();
-    this.publish({ status: 'error', error });
+    this.isEnded = true;
+    this.disposeResources();
+    this.snapshot = {
+      ...this.snapshot,
+      status: 'error',
+      error,
+      inviteQr: null,
+      verificationQr: null,
+      verificationCode: null,
+      localStream: null,
+      remoteStream: null,
+    };
+    this.listeners.forEach((listener) => listener(this.snapshot));
   }
 }
 

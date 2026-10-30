@@ -3,8 +3,8 @@ name: Hidden Messenger E2EE selection
 description: The current project decision to keep chat sending locked until a reviewed mobile-compatible E2EE implementation is chosen.
 ---
 
-The user requested native libsodium primitives for Hidden Messenger, but this does not replace a reviewed E2EE protocol. Keep text sending, media sharing, and migration disabled until the user selects a reviewed, mobile-compatible messaging protocol. Local media may be AES-GCM encrypted at rest only; do not wrap/send its file key without the protocol.
+The user requested native libsodium primitives for Hidden Messenger, but this does not replace a reviewed E2EE messaging protocol. Keep text sending, media sharing, and migration disabled until a reviewed, mobile-compatible protocol is selected. The user separately approved QR-verified WebRTC audio/video calls; this does not unlock chat or attachment transport. Local media may be AES-GCM encrypted at rest only; do not wrap/send its file key without the messaging protocol.
 
-**Why:** the user deferred E2EE pending review, then chose local-only encryption for media before that review. Primitive availability alone does not provide identity verification, a ratchet, replay protection, or session lifecycle.
+**Why:** the user deferred E2EE pending review, chose local-only encryption for media, and later approved calls only after QR fingerprint verification. These are separate security scopes; transport encryption for calls is not a reviewed chat protocol.
 
-**How to apply:** use primitives only inside local storage or a reviewed protocol; preserve the fail-closed adapter and disabled send controls until a protocol and native integration path are reviewed and approved.
+**How to apply:** preserve the fail-closed chat/media adapters and disabled send controls until a messaging protocol is reviewed. Calls may use WebRTC DTLS-SRTP only after the peer's current DTLS fingerprint is verified out-of-band; never present that as account or contact identity verification.

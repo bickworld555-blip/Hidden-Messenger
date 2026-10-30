@@ -4,6 +4,7 @@ import WebSocket, { WebSocketServer } from "ws";
 
 const SIGNAL_PATH = "/api/signal";
 const SESSION_TTL_MS = 2 * 60 * 1000;
+const ACTIVE_CALL_TTL_MS = 4 * 60 * 60 * 1000;
 const HANDSHAKE_TIMEOUT_MS = 10 * 1000;
 const MAX_SESSIONS = 250;
 const MAX_CONNECTIONS_PER_IP_PER_MINUTE = 20;
@@ -11,6 +12,7 @@ const CLEANUP_INTERVAL_MS = 30_000;
 
 type SignalingGatewayOptions = {
   sessionTtlMs?: number;
+  activeCallTtlMs?: number;
   cleanupIntervalMs?: number;
   handshakeTimeoutMs?: number;
   maxSessions?: number;
@@ -30,6 +32,7 @@ type Room = {
   joinTokenHash: Buffer;
   peers: Set<WebSocket>;
   expiresAt: number;
+  pairingExpiresAt: number;
 };
 
 const rooms = new Map<string, Room>();
@@ -153,13 +156,14 @@ function bindSocket(
           id,
           joinTokenHash: createHash("sha256").update(joinToken).digest(),
           peers: new Set([socket]),
-          expiresAt: Date.now() + options.sessionTtlMs,
+          expiresAt: Date.now() + options.activeCallTtlMs,
+          pairingExpiresAt: Date.now() + options.sessionTtlMs,
         };
         rooms.set(id, room);
         roomBySocket.set(socket, room);
         authenticated = true;
         clearTimeout(handshakeTimer);
-        send(socket, { type: "created", roomId: id, joinToken, expiresAt: room.expiresAt });
+        send(socket, { type: "created", roomId: id, joinToken, expiresAt: room.pairingExpiresAt });
         return;
       }
 
@@ -169,7 +173,7 @@ function bindSocket(
           socket.close(4004, "invalid or expired pairing");
           return;
         }
-        if (candidateRoom.expiresAt <= Date.now()) {
+        if (candidateRoom.pairingExpiresAt <= Date.now()) {
           closeRoom(candidateRoom, "pairing expired");
           socket.close(4004, "invalid or expired pairing");
           return;
@@ -247,6 +251,7 @@ export function attachSignalingGateway(
 ) {
   const resolvedOptions: Required<SignalingGatewayOptions> = {
     sessionTtlMs: options.sessionTtlMs ?? SESSION_TTL_MS,
+    activeCallTtlMs: options.activeCallTtlMs ?? ACTIVE_CALL_TTL_MS,
     cleanupIntervalMs: options.cleanupIntervalMs ?? CLEANUP_INTERVAL_MS,
     handshakeTimeoutMs: options.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS,
     maxSessions: options.maxSessions ?? MAX_SESSIONS,
@@ -256,7 +261,11 @@ export function attachSignalingGateway(
   const cleanupTimer = setInterval(() => {
     const now = Date.now();
     for (const room of rooms.values()) {
-      if (room.expiresAt <= now) closeRoom(room, "pairing expired");
+      if (room.peers.size === 1 && room.pairingExpiresAt <= now) {
+        closeRoom(room, "pairing expired");
+      } else if (room.peers.size === 2 && room.expiresAt <= now) {
+        closeRoom(room, "call expired");
+      }
     }
     for (const [key, window] of connectionWindows) {
       if (now - window.startedAt >= 60_000) connectionWindows.delete(key);

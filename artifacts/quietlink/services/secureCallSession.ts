@@ -26,7 +26,6 @@ export function createSecureCallSession(
     muted: false,
     cameraEnabled: mode === 'video',
   };
-  const notify: SecureCallListener = () => undefined;
   return {
     role,
     mode,
@@ -37,8 +36,8 @@ export function createSecureCallSession(
     startOutgoing: unavailable,
     join: (_invite: CallInvite) => unavailable(),
     verifyPeerQr: unavailable,
-    setMuted: notify,
-    setCameraEnabled: notify,
+    setMuted: (_muted: boolean) => undefined,
+    setCameraEnabled: (_enabled: boolean) => undefined,
     end: async () => undefined,
   };
 }

@@ -146,10 +146,10 @@ export default function ChatScreen() {
           <Text numberOfLines={1} style={[styles.headerName, { color: colors.foreground }]}>{thread.name}</Text>
           <Text style={[styles.headerStatus, { color: colors.mutedForeground }]}>{thread.online ? 'Online · preview' : 'Private conversation'}</Text>
         </View>
-        <Pressable onPress={() => router.push({ pathname: '/call/[id]', params: { id, name: thread.name, mode: 'audio', stage: 'outgoing' } })} hitSlop={10} accessibilityLabel="Open voice call preview">
+        <Pressable onPress={() => router.push({ pathname: '/call/[id]', params: { id, name: thread.name, mode: 'audio', role: 'host' } })} hitSlop={10} accessibilityLabel="Start verified voice call">
           <Feather name="phone" size={19} color={colors.primary} />
         </Pressable>
-        <Pressable onPress={() => router.push({ pathname: '/call/[id]', params: { id, name: thread.name, mode: 'video', stage: 'outgoing' } })} hitSlop={10} accessibilityLabel="Open video call preview" style={{ marginLeft: 15 }}>
+        <Pressable onPress={() => router.push({ pathname: '/call/[id]', params: { id, name: thread.name, mode: 'video', role: 'host' } })} hitSlop={10} accessibilityLabel="Start verified video call" style={{ marginLeft: 15 }}>
           <Feather name="video" size={20} color={colors.primary} />
         </Pressable>
         <Pressable onPress={onDelete} hitSlop={10} accessibilityLabel="Delete conversation" style={{ marginLeft: 15 }}>
@@ -162,8 +162,8 @@ export default function ChatScreen() {
         <Text style={[styles.prototypeText, { color: colors.accentForeground }]}>
           {messagingStatus === 'locked'
             ? storageStatus === 'encrypted'
-              ? 'E2EE sending locked · local media encrypted on device'
-              : 'E2EE sending locked · local media requires native SQLCipher'
+              ? 'Text messages stay on this device · QR-verified WebRTC calls are separate'
+              : 'Text messages are unavailable · local media requires native SQLCipher'
             : 'Secure messaging enabled'}
         </Text>
       </View>
@@ -216,7 +216,7 @@ export default function ChatScreen() {
         <TextInput
           value={draft}
           onChangeText={setDraft}
-          placeholder={messagingStatus === 'locked' ? 'Sending locked until E2EE is reviewed' : 'Message'}
+          placeholder={messagingStatus === 'locked' ? 'Text messaging unavailable' : 'Message'}
           placeholderTextColor={colors.mutedForeground}
           style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]}
           multiline

@@ -83,7 +83,7 @@
       [
         "@config-plugins/react-native-webrtc",
         {
-          "cameraPermission": "Hidden Messenger uses the camera only for video calls.",
+          "cameraPermission": "Hidden Messenger uses the camera to scan secure call pairing codes and for video calls.",
           "microphonePermission": "Hidden Messenger uses the microphone only during calls you accept."
         }
       ],

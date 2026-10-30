@@ -15,6 +15,6 @@ Expo's `name` is set to **Hidden Messenger** and supplies the Android applicatio
 ## Security status
 
 - Native builds must include SQLCipher; storage fails closed when it is unavailable.
-- Message sending, E2EE, real calls, remote push delivery, voice recording/playback, and device transfer remain disabled or preview-only until their reviewed secure implementations are available.
+- Text sending, message E2EE, media sharing, remote push delivery, and device transfer remain disabled. Local encrypted voice notes require a custom native build. QR-verified WebRTC audio/video calls are implemented in the native source and require a rebuilt iOS/Android app; native compilation and device verification are still pending.
 - Local media is encrypted at rest only. Its protocol AAD, database/key identifiers, SecureStore keys, and existing app scheme retain their `quietlink` values for compatibility; do not rename them as part of a display-name change.
 - See `docs/SECURITY_MODEL.md` for the current architecture, limitations, and native validation requirements.

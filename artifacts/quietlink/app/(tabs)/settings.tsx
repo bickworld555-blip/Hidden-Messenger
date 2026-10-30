@@ -324,8 +324,8 @@ export default function SettingsScreen() {
           <Feather name="alert-triangle" size={16} color={colors.primary} />
           <Text style={[styles.disclosureText, { color: colors.accentForeground }]}>
             {storageStatus === 'encrypted'
-              ? 'Demo history is stored in the local SQLCipher vault. Imported media is encrypted locally only. E2EE sending, voice recording, real calls, remote push, and device transfer are not connected. Flash storage and backups cannot be reliably shredded.'
-              : 'Demo history is held in app memory and is not transmitted. Local media import requires SQLCipher. E2EE sending, voice recording, real calls, remote push, and device transfer are not connected.'}
+              ? 'Demo history is stored in the local SQLCipher vault. Imported media and voice notes are encrypted locally only. Text sending, media sharing, remote push, and device transfer are not connected. QR-verified WebRTC calls require a rebuilt native app and device testing. Flash storage and backups cannot be reliably shredded.'
+              : 'Demo history is held in app memory and is not transmitted. Local media import requires SQLCipher. Text sending, media sharing, remote push, and device transfer are not connected. WebRTC calls require a rebuilt native app and device testing.'}
           </Text>
         </View>
         <Text style={[styles.version, { color: colors.mutedForeground }]}>Hidden Messenger · Private by design, transparent by default</Text>
