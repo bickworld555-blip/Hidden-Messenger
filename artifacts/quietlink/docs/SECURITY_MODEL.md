@@ -61,6 +61,14 @@ The delete action removes message/conversation rows from SQLCipher when the nati
 8. Build a custom iOS/Android binary after adding Expo Audio and Notifications, then validate permission prompts and local alerts on physical devices. Web preview cannot verify native permission behavior, call audio, or background delivery.
 9. Complete a third-party security review and publish a threat model before making production privacy or security claims.
 
+## Native media privacy audit status
+
+The source review confirms that app-owned image/video/audio imports are written as authenticated ciphertext containers (`.qlm`), with file keys stored in SQLCipher metadata. The picker requests `copyToCacheDirectory: false`, and an unreadable provider URI fails instead of copying plaintext into cache. The chat screen does not render decrypted photos or videos; it shows a locked placeholder. Voice notes are stored as authenticated ciphertext frames and rendered as PCM through native in-memory audio output. The media and voice-note storage modules do not log media bytes, file keys, or picker URIs, and this project has no configured third-party crash-reporting integration.
+
+The app does not currently configure screenshot/app-switcher protection. Media contents are not rendered in the chat preview, but ordinary chat text and contact names can appear in an OS snapshot. The app also does not exclude its encrypted media containers or SQLCipher database from operating-system backups. If backed up, those app-owned files contain ciphertext; the vault key is stored with device-only iOS Keychain accessibility, and Android SecureStore backup exclusion is configured. Generated native backup rules, restore behavior, OS crash diagnostics, and actual app-switcher snapshots have not been inspected on devices.
+
+This is a source-level review only, not a device privacy certification. Importing provider files, interrupted reads, corrupted-tag rejection, file cleanup, backup contents, and snapshot behavior still require testing in rebuilt custom iOS and Android binaries. This workspace has no Xcode, Java/Android SDK, or physical test devices, so those checks are not claimed as passing.
+
 ## Known non-goals in this prototype
 
 - No WhatsApp branding, copied assets, or exact proprietary screen reproduction.
