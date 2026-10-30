@@ -34,6 +34,19 @@ type LocalMediaAttachment = {
 
 export type LocalMediaAttachmentSummary = Omit<LocalMediaAttachment, 'file_key_hex'>;
 
+type LocalVoiceNote = {
+  id: string;
+  conversation_id: string;
+  sample_rate: number;
+  channels: number;
+  total_bytes: number;
+  chunk_count: number;
+  file_key_hex: string;
+  created_at: number;
+};
+
+export type LocalVoiceNoteSummary = Omit<LocalVoiceNote, 'file_key_hex'>;
+
 export async function shouldSeedDemoContent() {
   const SecureStore = await import('expo-secure-store');
   return (await SecureStore.getItemAsync(DEMO_SUPPRESSED_KEY)) !== 'true';
@@ -126,7 +139,19 @@ async function initializeDatabase() {
       );
       CREATE INDEX IF NOT EXISTS media_by_conversation_time
         ON media_attachments(conversation_id, created_at);
-      PRAGMA user_version = 2;
+      CREATE TABLE IF NOT EXISTS voice_notes (
+        id TEXT PRIMARY KEY NOT NULL,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        sample_rate INTEGER NOT NULL CHECK (sample_rate = 16000),
+        channels INTEGER NOT NULL CHECK (channels = 1),
+        total_bytes INTEGER NOT NULL CHECK (total_bytes > 0 AND total_bytes <= 10485760),
+        chunk_count INTEGER NOT NULL CHECK (chunk_count > 0),
+        file_key_hex TEXT NOT NULL CHECK (length(file_key_hex) = 64),
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS voice_notes_by_conversation_time
+        ON voice_notes(conversation_id, created_at);
+      PRAGMA user_version = 3;
     `);
     return database;
   } catch (error) {
@@ -317,6 +342,74 @@ export async function listLocalMediaAttachments(conversationId: string) {
      FROM media_attachments WHERE conversation_id = ? ORDER BY created_at ASC`,
     conversationId,
   );
+}
+
+export async function saveLocalVoiceNote(note: {
+  id: string;
+  conversationId: string;
+  sampleRate: number;
+  channels: number;
+  totalBytes: number;
+  chunkCount: number;
+  fileKeyHex: string;
+}) {
+  if (!/^[0-9a-f-]{36}$/i.test(note.id)) {
+    throw new Error('Invalid local voice-note identifier.');
+  }
+  if (
+    note.sampleRate !== 16_000 ||
+    note.channels !== 1 ||
+    !Number.isSafeInteger(note.totalBytes) ||
+    note.totalBytes <= 0 ||
+    note.totalBytes > 10 * 1024 * 1024 ||
+    note.totalBytes % 2 !== 0 ||
+    !Number.isSafeInteger(note.chunkCount) ||
+    note.chunkCount <= 0 ||
+    note.chunkCount > 3_200
+  ) {
+    throw new Error('Invalid local voice-note metadata.');
+  }
+  if (!/^[0-9a-f]{64}$/i.test(note.fileKeyHex)) {
+    throw new Error('Invalid local voice-note key. The recording was not saved.');
+  }
+
+  const db = await openSecureChatDatabase();
+  await db.runAsync(
+    `INSERT INTO voice_notes (
+      id, conversation_id, sample_rate, channels, total_bytes, chunk_count, file_key_hex, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    note.id,
+    note.conversationId,
+    note.sampleRate,
+    note.channels,
+    note.totalBytes,
+    note.chunkCount,
+    note.fileKeyHex.toLowerCase(),
+    Date.now(),
+  );
+}
+
+export async function getLocalVoiceNote(id: string) {
+  const db = await openSecureChatDatabase();
+  return db.getFirstAsync<LocalVoiceNote>(
+    `SELECT id, conversation_id, sample_rate, channels, total_bytes, chunk_count, file_key_hex, created_at
+     FROM voice_notes WHERE id = ?`,
+    id,
+  );
+}
+
+export async function listLocalVoiceNotes(conversationId: string) {
+  const db = await openSecureChatDatabase();
+  return db.getAllAsync<LocalVoiceNoteSummary>(
+    `SELECT id, conversation_id, sample_rate, channels, total_bytes, chunk_count, created_at
+     FROM voice_notes WHERE conversation_id = ? ORDER BY created_at DESC`,
+    conversationId,
+  );
+}
+
+export async function deleteLocalVoiceNote(id: string) {
+  const db = await openSecureChatDatabase();
+  await db.runAsync('DELETE FROM voice_notes WHERE id = ?', id);
 }
 
 export async function deleteLocalConversation(conversationId: string) {

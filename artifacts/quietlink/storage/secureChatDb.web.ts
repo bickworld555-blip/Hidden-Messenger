@@ -11,6 +11,16 @@ export type LocalConversation = {
   is_group: number;
 };
 
+export type LocalVoiceNoteSummary = {
+  id: string;
+  conversation_id: string;
+  sample_rate: number;
+  channels: number;
+  total_bytes: number;
+  chunk_count: number;
+  created_at: number;
+};
+
 const unavailable = () => new Error('Encrypted chat storage requires the native iOS or Android SQLCipher build.');
 
 export async function openSecureChatDatabase(): Promise<never> {
@@ -54,6 +64,22 @@ export async function getLocalMediaAttachment(): Promise<never> {
 }
 
 export async function listLocalMediaAttachments(): Promise<never[]> {
+  throw unavailable();
+}
+
+export async function saveLocalVoiceNote(): Promise<never> {
+  throw unavailable();
+}
+
+export async function getLocalVoiceNote(): Promise<never> {
+  throw unavailable();
+}
+
+export async function listLocalVoiceNotes(): Promise<never[]> {
+  throw unavailable();
+}
+
+export async function deleteLocalVoiceNote(): Promise<never> {
   throw unavailable();
 }
 

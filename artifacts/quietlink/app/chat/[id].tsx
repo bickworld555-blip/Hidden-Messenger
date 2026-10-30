@@ -78,17 +78,21 @@ export default function ChatScreen() {
     }
   };
 
-  const checkMicrophoneForVoiceNotes = async () => {
-    const permission = await requestDevicePermission('microphone');
-    if (permission.status === 'granted') {
-      Alert.alert('Microphone allowed', 'Voice recording remains locked until Hidden Messenger can encrypt microphone data without creating a plaintext temporary file.');
-    } else if (permission.status === 'unavailable') {
-      Alert.alert('Microphone unavailable', 'Request microphone access from the native iOS or Android app. This web preview cannot record securely.');
-    } else if (permission.status === 'denied' && !permission.canAskAgain) {
-      Alert.alert('Microphone access denied', 'Open Hidden Messenger in device settings to allow microphone access.');
-    } else {
-      Alert.alert('Microphone access needed', 'Allow microphone access to prepare for voice notes. Recording is still locked until encrypted capture is available.');
+  const checkMicrophoneForVoiceNotes = async (): Promise<boolean> => {
+    try {
+      const permission = await requestDevicePermission('microphone');
+      if (permission.status === 'granted') return true;
+      if (permission.status === 'unavailable') {
+        Alert.alert('Microphone unavailable', 'Request microphone access from the native iOS or Android app. This web preview cannot record securely.');
+      } else if (permission.status === 'denied' && !permission.canAskAgain) {
+        Alert.alert('Microphone access denied', 'Open Hidden Messenger in device settings to allow microphone access.');
+      } else {
+        Alert.alert('Microphone access needed', 'Allow microphone access to record a local encrypted voice note.');
+      }
+    } catch {
+      Alert.alert('Microphone unavailable', 'Hidden Messenger could not check microphone permission.');
     }
+    return false;
   };
 
   const onDelete = () => Alert.alert(
@@ -198,7 +202,9 @@ export default function ChatScreen() {
 
       {voicePanelOpen ? (
         <VoiceNotePanel
-          onCheckMicrophone={() => void checkMicrophoneForVoiceNotes()}
+          conversationId={id}
+          storageReady={storageStatus === 'encrypted'}
+          onCheckMicrophone={checkMicrophoneForVoiceNotes}
           onClose={() => setVoicePanelOpen(false)}
         />
       ) : null}
