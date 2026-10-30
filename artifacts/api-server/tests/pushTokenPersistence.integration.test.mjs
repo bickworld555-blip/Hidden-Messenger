@@ -50,3 +50,47 @@ test("a registration survives a service restart using the shared database", {
     await firstService.revokeExpoPushToken(accountId, pushToken);
   }
 });
+
+test("self-test cooldowns survive restarts, expire, and admit only one concurrent claim", {
+  skip: !enabled,
+}, async () => {
+  assert.ok(process.env.SESSION_SECRET, "SESSION_SECRET must be configured");
+  const now = Date.now();
+  const accountId = derivePushAccountId(
+    `88017${process.pid}${now}`,
+    process.env.SESSION_SECRET,
+  );
+  const persistence = new PostgresPushTokenPersistence();
+
+  assert.equal(
+    await persistence.claimTestCooldown(accountId, now - 60_000, 30_000),
+    true,
+  );
+  assert.equal(await persistence.claimTestCooldown(accountId, now, 30_000), true);
+  assert.equal(
+    await new PostgresPushTokenPersistence().claimTestCooldown(
+      accountId,
+      now + 1_000,
+      30_000,
+    ),
+    false,
+  );
+  assert.equal(
+    await new PostgresPushTokenPersistence().claimTestCooldown(
+      accountId,
+      now + 30_001,
+      30_000,
+    ),
+    true,
+  );
+
+  const concurrentAccountId = derivePushAccountId(
+    `88018${process.pid}${now}`,
+    process.env.SESSION_SECRET,
+  );
+  const [firstClaim, secondClaim] = await Promise.all([
+    persistence.claimTestCooldown(concurrentAccountId, now, 30_000),
+    new PostgresPushTokenPersistence().claimTestCooldown(concurrentAccountId, now, 30_000),
+  ]);
+  assert.deepEqual([firstClaim, secondClaim].sort(), [false, true]);
+});

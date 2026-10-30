@@ -9,6 +9,7 @@ import type { PushTokenPersistence } from "./pushTokenPersistence";
 
 const PUSH_ENDPOINT = "https://exp.host/--/api/v2/push/send";
 const MAX_TOKENS_PER_ACCOUNT = 8;
+const PUSH_TEST_COOLDOWN_MS = 30_000;
 const PUSH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_ACCOUNTS = 10_000;
 const RECEIPT_CHECK_DELAY_MS = 15 * 60 * 1000;
@@ -31,7 +32,6 @@ type PushNotificationServiceOptions = {
   receiptCheckDelayMs?: number;
 };
 
-const testCooldowns = new Map<string, number>();
 const TOKEN_ENVELOPE_VERSION = "v1";
 const TOKEN_NONCE_BYTES = 12;
 const TOKEN_TAG_BYTES = 16;
@@ -169,22 +169,6 @@ function decryptPushToken(
   }
 }
 
-function pruneExpiredTestCooldowns(now: number) {
-  for (const [accountId, retryAt] of testCooldowns) {
-    if (retryAt <= now) testCooldowns.delete(accountId);
-  }
-}
-
-export function allowPushTest(accountId: string) {
-  if (!accountIdPattern.test(accountId)) return false;
-  const now = Date.now();
-  pruneExpiredTestCooldowns(now);
-  const retryAt = testCooldowns.get(accountId) ?? 0;
-  if (retryAt > now) return false;
-  testCooldowns.set(accountId, now + 30_000);
-  return true;
-}
-
 export function createPushNotificationService(
   persistence: PushTokenPersistence,
   options: PushNotificationServiceOptions = {},
@@ -194,7 +178,16 @@ export function createPushNotificationService(
 
   return {
     async pruneExpiredRegistrations() {
-      await persistence.pruneExpired(Date.now());
+      const now = Date.now();
+      await Promise.all([
+        persistence.pruneExpired(now),
+        persistence.pruneExpiredTestCooldowns(now),
+      ]);
+    },
+
+    async allowPushTest(accountId: string, now = Date.now()) {
+      if (!accountIdPattern.test(accountId)) return false;
+      return persistence.claimTestCooldown(accountId, now, PUSH_TEST_COOLDOWN_MS);
     },
 
     async registerExpoPushToken(accountId: string, token: string, expiresAt: number) {
@@ -377,6 +370,11 @@ async function getPersistentPushService() {
 export async function initializePushTokenPersistence() {
   const service = await getPersistentPushService();
   await service.pruneExpiredRegistrations();
+}
+
+export async function allowPushTest(accountId: string) {
+  if (!accountIdPattern.test(accountId)) return false;
+  return (await getPersistentPushService()).allowPushTest(accountId);
 }
 
 export async function registerExpoPushToken(accountId: string, token: string, expiresAt: number) {

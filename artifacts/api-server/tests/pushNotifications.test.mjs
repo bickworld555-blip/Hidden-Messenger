@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  allowPushTest,
   createPushNotificationService,
   derivePushAccountId,
 } from "../src/lib/pushNotifications.ts";
@@ -13,13 +12,27 @@ const account = (suffix) => derivePushAccountId(`88017${suffix.padEnd(8, "0").sl
 
 function createMemoryPersistence() {
   const records = new Map();
+  const cooldowns = new Map();
 
   const persistence = {
     records,
+    cooldowns,
     async pruneExpired(now) {
       for (const [fingerprint, registration] of records) {
         if (registration.expiresAt <= now) records.delete(fingerprint);
       }
+    },
+    async pruneExpiredTestCooldowns(now) {
+      for (const [accountId, expiresAt] of cooldowns) {
+        if (expiresAt <= now) cooldowns.delete(accountId);
+      }
+    },
+    async claimTestCooldown(accountId, now, cooldownMs) {
+      await persistence.pruneExpiredTestCooldowns(now);
+      const expiresAt = cooldowns.get(accountId) ?? 0;
+      if (expiresAt > now) return false;
+      cooldowns.set(accountId, now + cooldownMs);
+      return true;
     },
     async register(registration, now, limits) {
       await persistence.pruneExpired(now);
@@ -400,8 +413,33 @@ test("device registration limits are preserved", async () => {
   assert.equal(persistence.records.size, 8);
 });
 
-test("test alerts are rate limited per account", () => {
+test("test cooldown survives service restarts and expires", async () => {
+  const persistence = createMemoryPersistence();
   const accountId = account("test-limit");
-  assert.equal(allowPushTest(accountId), true);
-  assert.equal(allowPushTest(accountId), false);
+  const now = Date.now();
+  const firstService = createPushNotificationService(persistence);
+  assert.equal(await firstService.allowPushTest(accountId, now), true);
+
+  assert.deepEqual([...persistence.cooldowns.entries()].map(([id, expiresAt]) => [
+    id === accountId,
+    expiresAt === now + 30_000,
+  ]), [[true, true]]);
+
+  const restartedService = createPushNotificationService(persistence);
+  assert.equal(await restartedService.allowPushTest(accountId, now + 29_999), false);
+  assert.equal(await restartedService.allowPushTest(accountId, now + 30_000), true);
+});
+
+test("simultaneous test requests claim only one cooldown", async () => {
+  const persistence = createMemoryPersistence();
+  const accountId = account("parallel-test-limit");
+  const now = Date.now();
+  const services = [
+    createPushNotificationService(persistence),
+    createPushNotificationService(persistence),
+  ];
+  const results = await Promise.all(
+    services.map((service) => service.allowPushTest(accountId, now)),
+  );
+  assert.deepEqual(results.sort(), [false, true]);
 });

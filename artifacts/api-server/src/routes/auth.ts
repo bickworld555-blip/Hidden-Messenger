@@ -384,7 +384,14 @@ router.post("/auth/push-test", async (req, res) => {
     return;
   }
   const accountId = derivePushAccountId(authenticated.session.phone, sessionSecret);
-  if (!allowPushTest(accountId)) {
+  let allowed: boolean;
+  try {
+    allowed = await allowPushTest(accountId);
+  } catch {
+    sendError(res, 503, "PUSH_TEST_UNAVAILABLE", "Notification testing is temporarily unavailable.");
+    return;
+  }
+  if (!allowed) {
     sendError(res, 429, "PUSH_TEST_RATE_LIMITED", "Wait before sending another test alert.");
     return;
   }

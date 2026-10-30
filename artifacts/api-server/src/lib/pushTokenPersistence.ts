@@ -19,6 +19,8 @@ export type PushTokenLimits = {
 
 export interface PushTokenPersistence {
   pruneExpired(now: number): Promise<void>;
+  pruneExpiredTestCooldowns(now: number): Promise<void>;
+  claimTestCooldown(accountId: string, now: number, cooldownMs: number): Promise<boolean>;
   register(
     registration: PushTokenRegistration,
     now: number,
@@ -37,6 +39,26 @@ export class PostgresPushTokenPersistence implements PushTokenPersistence {
       "DELETE FROM push_device_registrations WHERE expires_at <= $1",
       [new Date(now)],
     );
+  }
+
+  async pruneExpiredTestCooldowns(now: number) {
+    await pool.query(
+      "DELETE FROM push_test_cooldowns WHERE expires_at <= $1",
+      [new Date(now)],
+    );
+  }
+
+  async claimTestCooldown(accountId: string, now: number, cooldownMs: number) {
+    await this.pruneExpiredTestCooldowns(now);
+    const result = await pool.query(
+      `INSERT INTO push_test_cooldowns (account_id, expires_at)
+       VALUES ($1, $2)
+       ON CONFLICT (account_id) DO UPDATE SET expires_at = EXCLUDED.expires_at
+       WHERE push_test_cooldowns.expires_at <= $3
+       RETURNING account_id`,
+      [accountId, new Date(now + cooldownMs), new Date(now)],
+    );
+    return (result.rowCount ?? 0) > 0;
   }
 
   async register(
