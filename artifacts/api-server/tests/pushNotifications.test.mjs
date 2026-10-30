@@ -291,6 +291,140 @@ test("delayed DeviceNotRegistered receipts remove the device registration", asyn
   assert.equal(persistence.records.size, 0);
 });
 
+test("an immediate rejection removes only its device while siblings remain deliverable", async () => {
+  const persistence = createMemoryPersistence();
+  const service = createPushNotificationService(persistence);
+  const accountId = account("mixed-immediate");
+  const rejectedToken = token("immediate-rejected");
+  const healthyToken = token("immediate-healthy");
+  await service.registerExpoPushToken(accountId, rejectedToken, Date.now() + 60_000);
+  await service.registerExpoPushToken(accountId, healthyToken, Date.now() + 60_000);
+
+  const firstResult = await service.sendGenericPushNotification({
+    accountId,
+    type: "message",
+    routeId: "f47ac10b58cc4372a5670e02b2c3d479",
+  }, async (_url, init) => {
+    const messages = JSON.parse(init.body);
+    assert.deepEqual(messages.map((message) => message.to === rejectedToken), [true, false]);
+    assert.deepEqual(messages.map((message) => message.to === healthyToken), [false, true]);
+    assert.ok(messages.every((message) => message.body === "New message"));
+    return new Response(JSON.stringify({
+      data: [
+        { status: "error", details: { error: "DeviceNotRegistered" } },
+        { status: "ok" },
+      ],
+    }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+
+  assert.deepEqual(firstResult, { acceptedCount: 1, tokenCount: 2 });
+  assert.equal(persistence.records.size, 1);
+
+  const nextResult = await service.sendGenericPushNotification({
+    accountId,
+    type: "message",
+    routeId: "f47ac10b58cc4372a5670e02b2c3d479",
+  }, async (_url, init) => {
+    const messages = JSON.parse(init.body);
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].to === rejectedToken, false);
+    assert.equal(messages[0].to === healthyToken, true);
+    return makeFetchResponse({ status: "ok" });
+  });
+
+  assert.deepEqual(nextResult, { acceptedCount: 1, tokenCount: 1 });
+});
+
+test("delayed receipts remove only the matching failed device", async () => {
+  const persistence = createMemoryPersistence();
+  const accountId = account("mixed-receipts");
+  const rejectedToken = token("receipt-rejected");
+  const healthyToken = token("receipt-healthy");
+  let resolveRemoved;
+  const removed = new Promise((resolve) => {
+    resolveRemoved = resolve;
+  });
+  const remove = persistence.remove;
+  persistence.remove = async (registeredAccountId, fingerprint) => {
+    await remove(registeredAccountId, fingerprint);
+    resolveRemoved();
+  };
+  const service = createPushNotificationService(persistence, {
+    receiptCheckDelayMs: 0,
+    retrySleep: async () => {},
+  });
+  await service.registerExpoPushToken(accountId, rejectedToken, Date.now() + 60_000);
+  await service.registerExpoPushToken(accountId, healthyToken, Date.now() + 60_000);
+
+  let sendCount = 0;
+  let receiptCount = 0;
+  const firstResult = await service.sendGenericPushNotification({
+    accountId,
+    type: "test",
+    routeId: "f47ac10b58cc4372a5670e02b2c3d479",
+  }, async (url, init) => {
+    if (url.endsWith("/push/send")) {
+      sendCount += 1;
+      const messages = JSON.parse(init.body);
+      assert.deepEqual(messages.map((message) => message.to === rejectedToken), [true, false]);
+      assert.deepEqual(messages.map((message) => message.to === healthyToken), [false, true]);
+      return new Response(JSON.stringify({
+        data: [
+          { status: "ok", id: "ticket-rejected-device" },
+          { status: "ok", id: "ticket-healthy-device" },
+        ],
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+
+    assert.equal(url, "https://exp.host/--/api/v2/push/getReceipts");
+    receiptCount += 1;
+    assert.deepEqual(JSON.parse(init.body), {
+      ids: ["ticket-rejected-device", "ticket-healthy-device"],
+    });
+    return new Response(JSON.stringify({
+      data: {
+        "ticket-healthy-device": { status: "ok" },
+        "ticket-rejected-device": {
+          status: "error",
+          details: { error: "DeviceNotRegistered" },
+        },
+      },
+    }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+
+  assert.deepEqual(firstResult, { acceptedCount: 2, tokenCount: 2 });
+  await Promise.race([
+    removed,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("receipt cleanup timed out")), 1_000)),
+  ]);
+  assert.equal(sendCount, 1);
+  assert.equal(receiptCount, 1);
+  assert.equal(persistence.records.size, 1);
+
+  const nextResult = await service.sendGenericPushNotification({
+    accountId,
+    type: "test",
+    routeId: "f47ac10b58cc4372a5670e02b2c3d479",
+  }, async (url, init) => {
+    assert.equal(url, "https://exp.host/--/api/v2/push/send");
+    const messages = JSON.parse(init.body);
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].to === rejectedToken, false);
+    assert.equal(messages[0].to === healthyToken, true);
+    return makeFetchResponse({ status: "ok" });
+  });
+  assert.deepEqual(nextResult, { acceptedCount: 1, tokenCount: 1 });
+});
+
 test("429 provider responses retry twice with bounded deterministic delays", async () => {
   const persistence = createMemoryPersistence();
   const accountId = account("retry-429");
