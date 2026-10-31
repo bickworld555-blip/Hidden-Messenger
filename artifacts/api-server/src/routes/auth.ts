@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { Router, type Request } from "express";
 import { logger } from "../lib/logger";
+import { persistVerifiedAccount } from "../lib/accountPersistence";
 import {
   allowPushTest,
   derivePushAccountId,
@@ -252,7 +253,7 @@ router.post("/auth/otp/request", async (req, res) => {
   });
 });
 
-router.post("/auth/otp/verify", (req, res) => {
+router.post("/auth/otp/verify", async (req, res) => {
   const body = req.body as { phone?: unknown; code?: unknown } | undefined;
   const phone = normalizeBangladeshPhone(body?.phone);
   const code = typeof body?.code === "string" ? body.code.trim() : "";
@@ -289,12 +290,28 @@ router.post("/auth/otp/verify", (req, res) => {
     return;
   }
 
+  const accountId = derivePushAccountId(phone, otpSecret);
+  try {
+    await persistVerifiedAccount(accountId, new Date(now));
+  } catch (error) {
+    logger.error(
+      { subsystem: "mongodb-atlas", errorName: error instanceof Error ? error.name : "UnknownError" },
+      "Could not persist verified account",
+    );
+    sendError(
+      res,
+      503,
+      "ACCOUNT_STORE_UNAVAILABLE",
+      "Account storage is temporarily unavailable. Please try again shortly.",
+    );
+    return;
+  }
+
   challenge.digest.fill(0);
   challenges.delete(phoneHash);
   const accessToken = randomBytes(32).toString("base64url");
   const expiresAt = now + SESSION_TTL_MS;
   sessions.set(hashKey(accessToken), { phone, expiresAt });
-  const accountId = derivePushAccountId(phone, otpSecret);
   res.status(200).json({
     accessToken,
     accountId,

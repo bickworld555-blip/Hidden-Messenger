@@ -3,6 +3,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { attachSignalingGateway } from "./lib/signaling";
 import { initializePushTokenPersistence } from "./lib/pushNotifications";
+import { connectMongoAtlas } from "./lib/mongo";
 
 const rawPort = process.env["PORT"];
 
@@ -25,6 +26,13 @@ void initializePushTokenPersistence().catch(() => {
   logger.warn(
     { subsystem: "push-token-registry" },
     "Could not prune expired push registrations at startup",
+  );
+});
+
+void connectMongoAtlas().catch((error) => {
+  logger.error(
+    { subsystem: "mongodb-atlas", errorName: error instanceof Error ? error.name : "UnknownError" },
+    "MongoDB Atlas connection could not be established at startup",
   );
 });
 
