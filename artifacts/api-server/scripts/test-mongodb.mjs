@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import mongoose from "mongoose";
+import { AccountModel } from "../src/models/account.ts";
 
 const uri = process.env["MONGODB_URI"];
 if (!uri) {
@@ -7,8 +8,7 @@ if (!uri) {
   process.exit(1);
 }
 
-const collectionName = "atlas_connectivity_probes";
-const probeId = randomUUID();
+const probeId = `atlas-probe-${randomUUID()}`;
 let connected = false;
 
 try {
@@ -16,27 +16,41 @@ try {
     appName: "HiddenMessengerAtlasCheck",
     connectTimeoutMS: 8_000,
     serverSelectionTimeoutMS: 8_000,
+    tls: true,
   });
   connected = true;
 
-  const collection = mongoose.connection.collection(collectionName);
-  await collection.insertOne({ _id: probeId, checkedAt: new Date() });
-  const found = await collection.findOne({ _id: probeId }, { projection: { _id: 1 } });
-  if (!found) throw new Error("Atlas probe read did not return the written record.");
+  await AccountModel.updateOne(
+    { _id: probeId },
+    {
+      $set: { lastAuthenticatedAt: new Date() },
+      $setOnInsert: {
+        contactSync: { mode: "local-only", lastMetadataSyncAt: null },
+      },
+    },
+    { upsert: true, runValidators: true },
+  ).exec();
+  const found = await AccountModel.findById(probeId)
+    .select("_id lastAuthenticatedAt contactSync.mode")
+    .lean()
+    .exec();
+  if (!found || found.contactSync?.mode !== "local-only") {
+    throw new Error("Atlas account schema read did not return the written record.");
+  }
 
-  const deleted = await collection.deleteOne({ _id: probeId });
+  const deleted = await AccountModel.deleteOne({ _id: probeId }).exec();
   if (deleted.deletedCount !== 1) {
     throw new Error("Atlas probe cleanup did not remove the temporary record.");
   }
 
-  console.info("MongoDB Atlas connectivity and read/write/delete checks passed.");
+  console.info("MongoDB Atlas account-schema insert/read/delete checks passed.");
 } catch (error) {
   const name = error instanceof Error ? error.name : "UnknownError";
   console.error(`MongoDB Atlas connectivity check failed (${name}).`);
   process.exitCode = 1;
 } finally {
   if (connected) {
-    await mongoose.connection.collection(collectionName).deleteOne({ _id: probeId }).catch(() => undefined);
+    await AccountModel.deleteOne({ _id: probeId }).exec().catch(() => undefined);
     await mongoose.disconnect();
   }
 }

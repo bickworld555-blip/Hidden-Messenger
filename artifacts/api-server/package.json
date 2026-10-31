@@ -10,7 +10,7 @@
     "test:signaling": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test tests/signaling.lifecycle.test.mjs",
     "test:notifications": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test tests/pushNotifications.test.mjs",
     "test:notifications:db": "esbuild tests/pushTokenPersistence.integration.test.mjs --bundle --platform=node --format=cjs --outfile=/tmp/quietlink-push-token-db.test.cjs && node --test /tmp/quietlink-push-token-db.test.cjs",
-    "test:mongodb": "node scripts/test-mongodb.mjs",
+    "test:mongodb": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/test-mongodb.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
