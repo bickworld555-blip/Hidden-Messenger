@@ -3,3 +3,4 @@
 - [Hidden Messenger E2EE selection](quietlink-e2ee-selection.md) — messaging stays locked pending protocol review; QR-verified WebRTC calls are a separate approved scope.
 - [WebRTC Expo Go guard](webrtc-expo-go-guard.md) — check `NativeModules.WebRTCModule` before importing `react-native-webrtc`; its package entry throws when the native bridge is absent.
 - [Mongoose Node ESM interop](mongoose-node-esm-interop.md) — use the default Mongoose import in Node's TypeScript strip loader; named imports from its CommonJS package fail at runtime.
+- [Expo Android coroutine overload](expo-android-coroutine-overload.md) — explicitly type zero-argument Coroutine blocks as Unit when Kotlin reports overload ambiguity.
