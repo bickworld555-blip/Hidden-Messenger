@@ -39,7 +39,8 @@ class SecureVoiceOutputModule : Module() {
 
     Events("audioInterruption")
 
-    AsyncFunction("startInterruptionMonitoring") Coroutine {
+    AsyncFunction("startInterruptionMonitoring")
+      .Coroutine<Unit> {
       withContext(Dispatchers.IO) {
         startInterruptionMonitoring()
       }
