@@ -2,6 +2,11 @@ name: Android test APK
 
 on:
   workflow_dispatch:
+    inputs:
+      api_base_url:
+        description: "Public HTTPS API origin (host only, without /api)"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -15,6 +20,8 @@ jobs:
     name: Build standalone Android test APK
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      EXPO_PUBLIC_API_BASE_URL: ${{ inputs.api_base_url }}
 
     steps:
       - name: Check out source
@@ -47,6 +54,31 @@ jobs:
 
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Validate API base URL
+        run: |
+          node <<'NODE'
+          const raw = process.env.EXPO_PUBLIC_API_BASE_URL;
+          let url;
+          try {
+            url = new URL(raw);
+          } catch {
+            console.error("api_base_url must be an absolute HTTPS origin.");
+            process.exit(1);
+          }
+          if (
+            url.protocol !== "https:" ||
+            !url.hostname ||
+            url.username ||
+            url.password ||
+            url.pathname !== "/" ||
+            url.search ||
+            url.hash
+          ) {
+            console.error("api_base_url must be an HTTPS origin without a path, query, or credentials.");
+            process.exit(1);
+          }
+          NODE
 
       - name: Generate Android project
         run: pnpm --filter @workspace/quietlink exec expo prebuild --platform android --no-install

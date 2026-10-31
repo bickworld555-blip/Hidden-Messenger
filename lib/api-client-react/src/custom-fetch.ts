@@ -61,10 +61,19 @@ function isUrl(input: RequestInfo | URL): input is URL {
 }
 
 function applyBaseUrl(input: RequestInfo | URL): RequestInfo | URL {
-  if (!_baseUrl) return input;
   const url = resolveUrl(input);
   // Only prepend to relative paths (starting with /)
   if (!url.startsWith("/")) return input;
+  if (!_baseUrl) {
+    // Browsers can resolve same-origin paths, but native fetch requires an
+    // absolute URL and otherwise throws a platform-specific MalformedURLException.
+    if (typeof document === "undefined") {
+      throw new Error(
+        "API base URL is not configured for this native build. Set EXPO_PUBLIC_API_BASE_URL to a public HTTPS origin.",
+      );
+    }
+    return input;
+  }
 
   const absolute = `${_baseUrl}${url}`;
   if (typeof input === "string") return absolute;

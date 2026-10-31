@@ -18,8 +18,44 @@ const secureStoreOptions: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
 };
 
-const apiDomain = process.env.EXPO_PUBLIC_DOMAIN;
-if (apiDomain) setBaseUrl(`https://${apiDomain}`);
+function configureApiBaseUrl(): boolean {
+  const configuredValue =
+    process.env.EXPO_PUBLIC_API_BASE_URL?.trim() ||
+    process.env.EXPO_PUBLIC_DOMAIN?.trim();
+  if (!configuredValue) return false;
+
+  try {
+    const normalizedValue = /^https?:\/\//i.test(configuredValue)
+      ? configuredValue
+      : `https://${configuredValue}`;
+    const url = new URL(normalizedValue);
+    if (
+      url.protocol !== "https:" ||
+      !url.hostname ||
+      url.username ||
+      url.password ||
+      url.pathname !== "/" ||
+      url.search ||
+      url.hash
+    ) {
+      return false;
+    }
+    setBaseUrl(url.origin);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const apiBaseUrlConfigured = configureApiBaseUrl();
+
+function requireApiBaseUrl() {
+  if (!apiBaseUrlConfigured) {
+    throw new Error(
+      "The sign-in server URL is missing or invalid in this app build. Configure EXPO_PUBLIC_API_BASE_URL with a public HTTPS origin.",
+    );
+  }
+}
 
 if (Platform.OS === "ios" || Platform.OS === "android") {
   setAuthTokenGetter(() => SecureStore.getItemAsync(SESSION_TOKEN_KEY, secureStoreOptions));
@@ -119,6 +155,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // best-effort and must not hold the splash screen or first route open.
         setSession({ phone: savedPhone, accountId: savedAccountId });
         setStatus("signedIn");
+        if (!apiBaseUrlConfigured) return;
         const validationVersion = restoreVersion.current;
         void Promise.resolve()
           .then(() => getAuthSession())
@@ -161,6 +198,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!isNativeAuthAvailable) {
       throw new Error("Phone verification is available in the iOS and Android apps.");
     }
+    requireApiBaseUrl();
     return requestOtpApi({ phone });
   }, []);
 
@@ -169,6 +207,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!isNativeAuthAvailable) {
       throw new Error("Phone verification is available in the iOS and Android apps.");
     }
+    requireApiBaseUrl();
     const response = await verifyOtpApi({ phone, code });
     try {
       await SecureStore.setItemAsync(SESSION_TOKEN_KEY, response.accessToken, secureStoreOptions);
@@ -188,10 +227,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     restoreVersion.current += 1;
     if (isNativeAuthAvailable) {
       await disableRemotePushNotifications().catch(() => false);
-      try {
-        await logoutAuthSession();
-      } catch {
-        // Local credentials are removed even if the server cannot be reached.
+      if (apiBaseUrlConfigured) {
+        try {
+          await logoutAuthSession();
+        } catch {
+          // Local credentials are removed even if the server cannot be reached.
+        }
       }
       await SecureStore.deleteItemAsync(SESSION_TOKEN_KEY, secureStoreOptions).catch(() => undefined);
       await SecureStore.deleteItemAsync(SESSION_PHONE_KEY, secureStoreOptions).catch(() => undefined);
