@@ -54,14 +54,27 @@ jobs:
           CI: "1"
           EXPO_NO_TELEMETRY: "1"
 
-      - name: Build debug APK
+      - name: Build standalone test APK
         working-directory: artifacts/quietlink/android
-        run: ./gradlew --no-daemon --stacktrace assembleDebug
+        # The React Native Gradle plugin intentionally omits JavaScript from
+        # the default debug variant. A release variant is bundled and still
+        # installable because Expo prebuild signs it with the debug test key.
+        run: ./gradlew --no-daemon --stacktrace assembleRelease
 
-      - name: Upload APK
+      - name: Verify APK contains the app bundle
+        working-directory: artifacts/quietlink/android
+        run: |
+          apk="app/build/outputs/apk/release/app-release.apk"
+          test -f "$apk"
+          if ! unzip -Z1 "$apk" | grep -Fxq "assets/index.android.bundle"; then
+            echo "::error::The standalone APK is missing its embedded JavaScript bundle."
+            exit 1
+          fi
+
+      - name: Upload standalone test APK
         uses: actions/upload-artifact@v4
         with:
-          name: Hidden-Messenger-Android-debug-${{ github.run_number }}
-          path: artifacts/quietlink/android/app/build/outputs/apk/debug/app-debug.apk
+          name: Hidden-Messenger-Android-test-${{ github.run_number }}
+          path: artifacts/quietlink/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 14

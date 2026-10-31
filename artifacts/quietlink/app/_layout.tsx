@@ -1,20 +1,14 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { ErrorBoundary as AppRenderErrorBoundary } from '@/components/ErrorBoundary';
 import { RootStartupErrorFallback } from '@/components/RootStartupErrorFallback';
-import {
-  Inter_400Regular,
-  Inter_500Medium,
-  Inter_600SemiBold,
-  Inter_700Bold,
-  useFonts,
-} from '@expo-google-fonts/inter';
 import { Stack } from 'expo-router';
 import { useRouter } from 'expo-router';
+import type { ErrorBoundaryProps } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { MessageProvider } from '@/context/MessageContext';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
@@ -31,11 +25,13 @@ export const unstable_settings = {
   anchor: 'login',
 };
 
-// Prevent the splash screen from auto-hiding before asset loading is complete.
-void SplashScreen.preventAutoHideAsync().catch(() => undefined);
-const STARTUP_SPLASH_TIMEOUT_MS = 8000;
-
 const queryClient = new QueryClient();
+
+// Expo Router's route-level boundary also catches errors thrown while this
+// layout itself is rendering, before the provider-level boundary can mount.
+export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
+  return <RootStartupErrorFallback error={error} resetError={retry} />;
+}
 
 type PushRoute = {
   type: 'call' | 'message' | 'test';
@@ -164,33 +160,14 @@ function AppContent() {
 }
 
 export default function RootLayout() {
-  const [fontsLoaded, fontError] = useFonts({
-    Inter_400Regular,
-    Inter_500Medium,
-    Inter_600SemiBold,
-    Inter_700Bold,
-  });
-  const [startupTimedOut, setStartupTimedOut] = useState(false);
-
   useEffect(() => {
-    if (fontsLoaded || fontError) return;
-    const timeout = setTimeout(
-      () => setStartupTimedOut(true),
-      STARTUP_SPLASH_TIMEOUT_MS,
-    );
-    return () => clearTimeout(timeout);
-  }, [fontsLoaded, fontError]);
-
-  useEffect(() => {
-    if (fontsLoaded || fontError || startupTimedOut) {
-      void SplashScreen.hideAsync().catch(() => undefined);
-    }
-  }, [fontsLoaded, fontError, startupTimedOut]);
-
-  if (!fontsLoaded && !fontError && !startupTimedOut) return null;
+    // Render the app on the first frame. Font loading and all other startup
+    // work must never hold the native splash screen open.
+    void SplashScreen.hideAsync().catch(() => undefined);
+  }, []);
 
   return (
-    <ErrorBoundary FallbackComponent={RootStartupErrorFallback}>
+    <AppRenderErrorBoundary FallbackComponent={RootStartupErrorFallback}>
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
           <GestureHandlerRootView>
@@ -204,7 +181,7 @@ export default function RootLayout() {
           </GestureHandlerRootView>
         </QueryClientProvider>
       </SafeAreaProvider>
-    </ErrorBoundary>
+    </AppRenderErrorBoundary>
   );
 }
 
