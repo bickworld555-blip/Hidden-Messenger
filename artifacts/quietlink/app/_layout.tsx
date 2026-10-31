@@ -1,10 +1,11 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { RootStartupErrorFallback } from '@/components/RootStartupErrorFallback';
 import {
   Inter_400Regular,
   Inter_500Medium,
@@ -31,7 +32,8 @@ export const unstable_settings = {
 };
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
-SplashScreen.preventAutoHideAsync();
+void SplashScreen.preventAutoHideAsync().catch(() => undefined);
+const STARTUP_SPLASH_TIMEOUT_MS = 8000;
 
 const queryClient = new QueryClient();
 
@@ -86,11 +88,11 @@ function RootLayoutNav({ signedIn }: { signedIn: boolean }) {
     let responseListener: { remove: () => void } | null = null;
 
     void (async () => {
-      const Notifications = await getOptionalNotificationsModule();
-      if (disposed || !Notifications) return;
-      await configureLocalNotifications();
-      if (disposed) return;
       try {
+        const Notifications = await getOptionalNotificationsModule();
+        if (disposed || !Notifications) return;
+        await configureLocalNotifications();
+        if (disposed) return;
         const handleResponse = (response: import('expo-notifications').NotificationResponse) => {
           const data = response.notification.request.content.data as Record<string, unknown>;
           const route = parsePushRoute(data);
@@ -103,7 +105,7 @@ function RootLayoutNav({ signedIn }: { signedIn: boolean }) {
         const lastResponse = await Notifications.getLastNotificationResponseAsync?.();
         if (!disposed && lastResponse) handleResponse(lastResponse);
       } catch {
-        // Native notification listeners are optional in Expo Go and previews.
+        // Notification modules are optional; their startup must never block navigation.
       }
     })();
 
@@ -125,7 +127,7 @@ function RootLayoutNav({ signedIn }: { signedIn: boolean }) {
 
   useEffect(() => {
     if (!settingsReady || !signedIn || !session?.accountId) return;
-    void syncRemotePushRegistration(settings.pushNotificationsEnabled);
+    void syncRemotePushRegistration(settings.pushNotificationsEnabled).catch(() => undefined);
   }, [settingsReady, settings.pushNotificationsEnabled, session?.accountId, signedIn]);
 
   return (
@@ -168,18 +170,28 @@ export default function RootLayout() {
     Inter_600SemiBold,
     Inter_700Bold,
   });
+  const [startupTimedOut, setStartupTimedOut] = useState(false);
 
   useEffect(() => {
-    if (fontsLoaded || fontError) {
-      SplashScreen.hideAsync();
-    }
+    if (fontsLoaded || fontError) return;
+    const timeout = setTimeout(
+      () => setStartupTimedOut(true),
+      STARTUP_SPLASH_TIMEOUT_MS,
+    );
+    return () => clearTimeout(timeout);
   }, [fontsLoaded, fontError]);
 
-  if (!fontsLoaded && !fontError) return null;
+  useEffect(() => {
+    if (fontsLoaded || fontError || startupTimedOut) {
+      void SplashScreen.hideAsync().catch(() => undefined);
+    }
+  }, [fontsLoaded, fontError, startupTimedOut]);
+
+  if (!fontsLoaded && !fontError && !startupTimedOut) return null;
 
   return (
-    <SafeAreaProvider>
-      <ErrorBoundary>
+    <ErrorBoundary FallbackComponent={RootStartupErrorFallback}>
+      <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
           <GestureHandlerRootView>
             <KeyboardProvider>
@@ -191,8 +203,8 @@ export default function RootLayout() {
             </KeyboardProvider>
           </GestureHandlerRootView>
         </QueryClientProvider>
-      </ErrorBoundary>
-    </SafeAreaProvider>
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }
 

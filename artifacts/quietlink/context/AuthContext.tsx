@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Platform } from "react-native";
 import * as SecureStore from "expo-secure-store";
 import {
@@ -49,6 +49,7 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 const isNativeAuthAvailable = Platform.OS === "ios" || Platform.OS === "android";
+const SESSION_RESTORE_TIMEOUT_MS = 6000;
 
 function errorStatus(error: unknown) {
   return typeof error === "object" && error !== null && "status" in error
@@ -59,9 +60,11 @@ function errorStatus(error: unknown) {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>("loading");
   const [session, setSession] = useState<AuthSession | null>(null);
+  const restoreVersion = useRef(0);
 
   useEffect(() => {
     let active = true;
+    let restoreTimer: ReturnType<typeof setTimeout> | undefined;
     async function restoreSession() {
       if (!isNativeAuthAvailable) {
         if (active) setStatus("signedOut");
@@ -69,39 +72,75 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       try {
-        const token = await SecureStore.getItemAsync(SESSION_TOKEN_KEY, secureStoreOptions);
-        const savedPhone = await SecureStore.getItemAsync(SESSION_PHONE_KEY, secureStoreOptions);
-        const savedAccountId = await SecureStore.getItemAsync(SESSION_ACCOUNT_ID_KEY, secureStoreOptions);
-        if (!token) {
-          if (active) {
-            setSession(null);
-            setStatus("signedOut");
+        const sessionRead = await Promise.race([
+          Promise.all([
+            SecureStore.getItemAsync(SESSION_TOKEN_KEY, secureStoreOptions),
+            SecureStore.getItemAsync(SESSION_PHONE_KEY, secureStoreOptions),
+            SecureStore.getItemAsync(SESSION_ACCOUNT_ID_KEY, secureStoreOptions),
+          ]).then(([token, phone, accountId]) => ({
+            kind: "ready" as const,
+            token,
+            phone,
+            accountId,
+          })),
+          new Promise<{ kind: "timeout" }>((resolve) => {
+            restoreTimer = setTimeout(
+              () => resolve({ kind: "timeout" }),
+              SESSION_RESTORE_TIMEOUT_MS,
+            );
+          }),
+        ]).finally(() => {
+          if (restoreTimer) clearTimeout(restoreTimer);
+        });
+
+        if (!active) return;
+        if (sessionRead.kind === "timeout") {
+          // Do not leave the app on a startup spinner if protected storage stalls.
+          setSession(null);
+          setStatus("signedOut");
+          return;
+        }
+
+        const { token, phone: savedPhone, accountId: savedAccountId } = sessionRead;
+        if (!token || !savedPhone || !savedAccountId) {
+          setSession(null);
+          setStatus("signedOut");
+          if (token || savedPhone || savedAccountId) {
+            void Promise.all([
+              SecureStore.deleteItemAsync(SESSION_TOKEN_KEY, secureStoreOptions),
+              SecureStore.deleteItemAsync(SESSION_PHONE_KEY, secureStoreOptions),
+              SecureStore.deleteItemAsync(SESSION_ACCOUNT_ID_KEY, secureStoreOptions),
+            ]).catch(() => undefined);
           }
           return;
         }
 
-        try {
-          const serverSession = await getAuthSession();
-          if (active) {
+        // Use the locally protected session immediately. Server validation is
+        // best-effort and must not hold the splash screen or first route open.
+        setSession({ phone: savedPhone, accountId: savedAccountId });
+        setStatus("signedIn");
+        const validationVersion = restoreVersion.current;
+        void Promise.resolve()
+          .then(() => getAuthSession())
+          .then((serverSession) => {
+            if (!active || restoreVersion.current !== validationVersion) return;
             setSession({ phone: serverSession.phone, accountId: serverSession.accountId });
-            setStatus("signedIn");
-          }
-          await SecureStore.setItemAsync(SESSION_ACCOUNT_ID_KEY, serverSession.accountId, secureStoreOptions).catch(() => undefined);
-        } catch (error) {
-          if (errorStatus(error) === 401) {
-            await SecureStore.deleteItemAsync(SESSION_TOKEN_KEY, secureStoreOptions);
-            await SecureStore.deleteItemAsync(SESSION_PHONE_KEY, secureStoreOptions);
-            await SecureStore.deleteItemAsync(SESSION_ACCOUNT_ID_KEY, secureStoreOptions);
-            if (active) {
-              setSession(null);
-              setStatus("signedOut");
-            }
-          } else if (active) {
-            // Preserve a device session during a temporary network outage.
-            setSession({ phone: savedPhone, accountId: savedAccountId });
-            setStatus("signedIn");
-          }
-        }
+          })
+          .catch((error: unknown) => {
+            if (
+              !active ||
+              restoreVersion.current !== validationVersion ||
+              errorStatus(error) !== 401
+            ) return;
+
+            setSession(null);
+            setStatus("signedOut");
+            void Promise.all([
+              SecureStore.deleteItemAsync(SESSION_TOKEN_KEY, secureStoreOptions),
+              SecureStore.deleteItemAsync(SESSION_PHONE_KEY, secureStoreOptions),
+              SecureStore.deleteItemAsync(SESSION_ACCOUNT_ID_KEY, secureStoreOptions),
+            ]).catch(() => undefined);
+          });
       } catch {
         if (active) {
           setSession(null);
@@ -113,10 +152,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     void restoreSession();
     return () => {
       active = false;
+      if (restoreTimer) clearTimeout(restoreTimer);
     };
   }, []);
 
   const requestOtp = useCallback(async (phone: string) => {
+    restoreVersion.current += 1;
     if (!isNativeAuthAvailable) {
       throw new Error("Phone verification is available in the iOS and Android apps.");
     }
@@ -124,6 +165,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const verifyOtp = useCallback(async (phone: string, code: string) => {
+    restoreVersion.current += 1;
     if (!isNativeAuthAvailable) {
       throw new Error("Phone verification is available in the iOS and Android apps.");
     }
@@ -143,6 +185,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    restoreVersion.current += 1;
     if (isNativeAuthAvailable) {
       await disableRemotePushNotifications().catch(() => false);
       try {
