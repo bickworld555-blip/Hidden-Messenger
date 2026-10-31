@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build installable debug APK
+    name: Build standalone Android test APK
     runs-on: ubuntu-24.04
     timeout-minutes: 45
 
@@ -59,7 +59,11 @@ jobs:
         # The React Native Gradle plugin intentionally omits JavaScript from
         # the default debug variant. A release variant is bundled and still
         # installable because Expo prebuild signs it with the debug test key.
-        run: ./gradlew --no-daemon --stacktrace assembleRelease
+        run: >-
+          ./gradlew --no-daemon --stacktrace
+          -Pandroid.enableMinifyInReleaseBuilds=false
+          -Pandroid.enableShrinkResourcesInReleaseBuilds=false
+          assembleRelease
 
       - name: Verify APK contains the app bundle
         working-directory: artifacts/quietlink/android
